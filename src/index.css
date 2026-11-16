@@ -1,0 +1,175 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+@import "tailwindcss";
+
+@theme {
+  --color-bg-main: #0B1220;
+  --color-bg-sidebar: #0D1726;
+  --color-bg-card: #141F30;
+  --color-bg-card-hover: #192438;
+  --color-border: #1E2D45;
+  --color-border-subtle: #192438;
+  --color-accent: #42D6C5;
+  --color-accent-dim: rgba(66, 214, 197, 0.12);
+  --color-text-primary: #F1F5F9;
+  --color-text-secondary: #94A3B8;
+  --color-text-muted: #64748B;
+  --color-danger: #EF4444;
+  --color-danger-dim: rgba(239, 68, 68, 0.12);
+  --color-warning: #F59E0B;
+  --color-warning-dim: rgba(245, 158, 11, 0.12);
+  --color-success: #10B981;
+  --color-success-dim: rgba(16, 185, 129, 0.12);
+  --color-info: #3B82F6;
+  --color-info-dim: rgba(59, 130, 246, 0.12);
+
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: #0B1220;
+  color: #F1F5F9;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0D1726;
+}
+::-webkit-scrollbar-thumb {
+  background: #1E2D45;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2a3f5f;
+}
+
+/* Dashboard responsive grids */
+.dashboard-charts-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+.dashboard-activity-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+
+/* Tablet (>= 640px and < 1024px) */
+@media (min-width: 640px) {
+  .dashboard-charts-grid {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+  .dashboard-activity-grid {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+}
+
+/* Desktop (>= 1024px) - preserves desktop layout */
+@media (min-width: 1024px) {
+  .dashboard-charts-grid {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  }
+  .dashboard-activity-grid {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  }
+}
+
+/* Responsive Metric Cards Grid */
+.dashboard-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 16px;
+}
+
+/* App layout, header, and sidebar responsive styling */
+.sidebar-container {
+  width: 220px;
+  min-width: 220px;
+  background: #0D1726;
+  border-right: 1px solid #1E2D45;
+  display: flex;
+  flex-direction: column;
+  transition: width 0.2s ease, min-width 0.2s ease;
+  position: relative;
+  z-index: 20;
+}
+
+.sidebar-container.collapsed {
+  width: 64px;
+  min-width: 64px;
+}
+
+@media (max-width: 639px) {
+  .sidebar-container:not(.collapsed) {
+    position: absolute;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    z-index: 50;
+    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.6);
+  }
+}
+
+.app-header {
+  height: 60px;
+  background: #0B1220;
+  border-bottom: 1px solid #1E2D45;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  gap: 8px;
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+@media (min-width: 640px) {
+  .app-header {
+    padding: 0 24px;
+    gap: 16px;
+  }
+}
+
+.app-main-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px;
+  background: #0B1220;
+  min-width: 0;
+}
+
+@media (min-width: 640px) {
+  .app-main-content {
+    padding: 24px;
+  }
+}
+
+@media (max-width: 480px) {
+  .header-user-label {
+    display: none;
+  }
+  .header-breadcrumb {
+    display: none !important;
+  }
+}
