@@ -22,14 +22,16 @@ interface HeaderProps {
 }
 
 const STATUS_LABEL: Record<MonitoringStatus, string> = {
-  active:     'Active',
+  active:     'Demo',
+  demo:       'Demo',
   paused:     'Paused',
   error:      'Error',
   connecting: 'Connecting',
 };
 
 const STATUS_COLOR: Record<MonitoringStatus, string> = {
-  active:     '#10B981',
+  active:     '#42D6C5',
+  demo:       '#42D6C5',
   paused:     '#F59E0B',
   error:      '#EF4444',
   connecting: '#3B82F6',
@@ -41,26 +43,15 @@ export function Header({ monitoringStatus, alertCount }: HeaderProps) {
   const color = STATUS_COLOR[monitoringStatus];
 
   return (
-    <header
-      style={{
-        height: 60,
-        background: '#0B1220',
-        borderBottom: '1px solid #1E2D45',
-        display: 'flex',
-        alignItems: 'center',
-        padding: '0 24px',
-        gap: 16,
-        flexShrink: 0,
-      }}
-    >
+    <header className="app-header">
       {/* Page title */}
-      <div style={{ flex: 1 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+      <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
+        <div className="header-breadcrumb" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
           <span style={{ color: '#94A3B8', fontSize: 12 }}>NetWatch</span>
           <ChevronRight size={12} color="#64748B" />
           <span style={{ color: '#F1F5F9', fontSize: 12, fontWeight: 500 }}>{meta.title}</span>
         </div>
-        <h1 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#F1F5F9', lineHeight: 1 }}>
+        <h1 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#F1F5F9', lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {meta.title}
         </h1>
       </div>
@@ -75,6 +66,7 @@ export function Header({ monitoringStatus, alertCount }: HeaderProps) {
           border: '1px solid #1E2D45',
           borderRadius: 8,
           padding: '5px 12px',
+          flexShrink: 0,
         }}
       >
         <div
@@ -84,7 +76,7 @@ export function Header({ monitoringStatus, alertCount }: HeaderProps) {
             borderRadius: '50%',
             background: color,
             boxShadow: `0 0 6px ${color}99`,
-            animation: monitoringStatus === 'active' ? 'pulse 2s infinite' : 'none',
+            animation: (monitoringStatus === 'active' || monitoringStatus === 'demo') ? 'pulse 2s infinite' : 'none',
           }}
         />
         <span style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500 }}>
@@ -154,7 +146,7 @@ export function Header({ monitoringStatus, alertCount }: HeaderProps) {
         >
           <User size={13} color="#42D6C5" />
         </div>
-        <span style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500 }}>Analyst</span>
+        <span className="header-user-label" style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500 }}>Analyst</span>
       </button>
 
       <style>{`

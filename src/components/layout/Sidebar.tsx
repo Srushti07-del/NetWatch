@@ -14,7 +14,7 @@ import {
   Shield,
   Wifi,
 } from 'lucide-react';
-import { NavLink, useLocation } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 
 interface NavItem {
   label: string;
@@ -38,21 +38,9 @@ interface SidebarProps {
 }
 
 export function Sidebar({ collapsed, onToggle }: SidebarProps) {
-  const location = useLocation();
-
   return (
     <aside
-      style={{
-        width: collapsed ? 64 : 220,
-        minWidth: collapsed ? 64 : 220,
-        background: '#0D1726',
-        borderRight: '1px solid #1E2D45',
-        display: 'flex',
-        flexDirection: 'column',
-        transition: 'width 0.2s ease, min-width 0.2s ease',
-        position: 'relative',
-        zIndex: 10,
-      }}
+      className={`sidebar-container ${collapsed ? 'collapsed' : ''}`}
     >
       {/* Logo */}
       <div
@@ -60,7 +48,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           height: 60,
           display: 'flex',
           alignItems: 'center',
-          padding: collapsed ? '0 20px' : '0 20px',
+          padding: '0 20px',
           borderBottom: '1px solid #1E2D45',
           gap: 10,
           overflow: 'hidden',
@@ -97,39 +85,34 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
       {/* Navigation */}
       <nav style={{ flex: 1, padding: '12px 8px', overflowY: 'auto' }}>
-        {NAV_ITEMS.map((item) => {
-          const isActive =
-            item.to === '/'
-              ? location.pathname === '/'
-              : location.pathname.startsWith(item.to);
-          return (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              title={collapsed ? item.label : undefined}
-              style={({ isActive: routerActive }) => ({
-                display: 'flex',
-                alignItems: 'center',
-                gap: 10,
-                padding: collapsed ? '10px 14px' : '10px 12px',
-                borderRadius: 8,
-                marginBottom: 2,
-                color: isActive || routerActive ? '#42D6C5' : '#94A3B8',
-                background: isActive || routerActive ? 'rgba(66, 214, 197, 0.08)' : 'transparent',
-                textDecoration: 'none',
-                fontSize: 13.5,
-                fontWeight: isActive || routerActive ? 600 : 400,
-                transition: 'background 0.15s, color 0.15s',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                justifyContent: collapsed ? 'center' : 'flex-start',
-              })}
-            >
-              <span style={{ flexShrink: 0 }}>{item.icon}</span>
-              {!collapsed && <span>{item.label}</span>}
-            </NavLink>
-          );
-        })}
+        {NAV_ITEMS.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.to === '/'}
+            title={collapsed ? item.label : undefined}
+            style={({ isActive }) => ({
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: collapsed ? '10px 14px' : '10px 12px',
+              borderRadius: 8,
+              marginBottom: 2,
+              color: isActive ? '#42D6C5' : '#94A3B8',
+              background: isActive ? 'rgba(66, 214, 197, 0.08)' : 'transparent',
+              textDecoration: 'none',
+              fontSize: 13.5,
+              fontWeight: isActive ? 600 : 400,
+              transition: 'background 0.15s, color 0.15s',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              justifyContent: collapsed ? 'center' : 'flex-start',
+            })}
+          >
+            <span style={{ flexShrink: 0 }}>{item.icon}</span>
+            {!collapsed && <span>{item.label}</span>}
+          </NavLink>
+        ))}
       </nav>
 
       {/* Status indicator */}
@@ -148,11 +131,11 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               width: 7,
               height: 7,
               borderRadius: '50%',
-              background: '#10B981',
-              boxShadow: '0 0 6px rgba(16, 185, 129, 0.6)',
+              background: '#42D6C5',
+              boxShadow: '0 0 6px rgba(66, 214, 197, 0.6)',
             }}
           />
-          <span style={{ color: '#94A3B8', fontSize: 12 }}>Monitoring Active</span>
+          <span style={{ color: '#94A3B8', fontSize: 12 }}>Demo Mode</span>
         </div>
       )}
 

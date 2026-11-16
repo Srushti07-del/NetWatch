@@ -69,12 +69,18 @@ export const mockProtocolData: ProtocolDataPoint[] = [
   { protocol: 'Other', value: 3800,  percentage: 3.2,  color: '#64748B' },
 ];
 
+// ─── Dynamic Timestamp Helpers ──────────────────────────────────────────────
+
+const now = Date.now();
+const secondsAgo = (s: number) => new Date(now - s * 1000).toISOString();
+const minutesAgo = (m: number) => new Date(now - m * 60 * 1000).toISOString();
+
 // ─── Recent Network Activity ─────────────────────────────────────────────────
 
 export const mockPackets: NetworkPacket[] = [
   {
     id: 'pkt-001',
-    timestamp: '2026-11-16T14:12:03Z',
+    timestamp: secondsAgo(28),
     sourceIp: '192.168.1.102',
     destinationIp: '8.8.8.8',
     sourcePort: 54231,
@@ -86,7 +92,7 @@ export const mockPackets: NetworkPacket[] = [
   },
   {
     id: 'pkt-002',
-    timestamp: '2026-11-16T14:12:05Z',
+    timestamp: secondsAgo(25),
     sourceIp: '10.0.0.5',
     destinationIp: '172.16.4.22',
     sourcePort: 443,
@@ -98,7 +104,7 @@ export const mockPackets: NetworkPacket[] = [
   },
   {
     id: 'pkt-003',
-    timestamp: '2026-11-16T14:12:07Z',
+    timestamp: secondsAgo(22),
     sourceIp: '192.168.1.78',
     destinationIp: '203.0.113.45',
     sourcePort: 50122,
@@ -110,7 +116,7 @@ export const mockPackets: NetworkPacket[] = [
   },
   {
     id: 'pkt-004',
-    timestamp: '2026-11-16T14:12:09Z',
+    timestamp: secondsAgo(19),
     sourceIp: '10.0.0.11',
     destinationIp: '1.1.1.1',
     sourcePort: 61033,
@@ -122,7 +128,7 @@ export const mockPackets: NetworkPacket[] = [
   },
   {
     id: 'pkt-005',
-    timestamp: '2026-11-16T14:12:11Z',
+    timestamp: secondsAgo(16),
     sourceIp: '198.51.100.14',
     destinationIp: '192.168.1.1',
     sourcePort: 4421,
@@ -134,7 +140,7 @@ export const mockPackets: NetworkPacket[] = [
   },
   {
     id: 'pkt-006',
-    timestamp: '2026-11-16T14:12:14Z',
+    timestamp: secondsAgo(13),
     sourceIp: '192.168.1.55',
     destinationIp: '151.101.64.81',
     sourcePort: 52011,
@@ -146,7 +152,7 @@ export const mockPackets: NetworkPacket[] = [
   },
   {
     id: 'pkt-007',
-    timestamp: '2026-11-16T14:12:16Z',
+    timestamp: secondsAgo(10),
     sourceIp: '10.0.0.3',
     destinationIp: '10.0.0.1',
     sourcePort: 68,
@@ -158,7 +164,7 @@ export const mockPackets: NetworkPacket[] = [
   },
   {
     id: 'pkt-008',
-    timestamp: '2026-11-16T14:12:18Z',
+    timestamp: secondsAgo(7),
     sourceIp: '203.0.113.99',
     destinationIp: '192.168.1.1',
     sourcePort: 54322,
@@ -170,7 +176,7 @@ export const mockPackets: NetworkPacket[] = [
   },
   {
     id: 'pkt-009',
-    timestamp: '2026-11-16T14:12:21Z',
+    timestamp: secondsAgo(4),
     sourceIp: '192.168.1.20',
     destinationIp: '172.217.12.46',
     sourcePort: 55600,
@@ -182,7 +188,7 @@ export const mockPackets: NetworkPacket[] = [
   },
   {
     id: 'pkt-010',
-    timestamp: '2026-11-16T14:12:24Z',
+    timestamp: secondsAgo(1),
     sourceIp: '10.0.0.8',
     destinationIp: '192.168.1.102',
     sourcePort: 445,
@@ -204,7 +210,7 @@ export const mockSecurityEvents: SecurityEvent[] = [
     severity: 'high',
     sourceIp: '203.0.113.45',
     destinationIp: '192.168.1.5',
-    timestamp: '2026-11-16T14:08:12Z',
+    timestamp: minutesAgo(4),
     protocol: 'TCP',
     eventType: 'brute_force',
     resolved: false,
@@ -216,7 +222,7 @@ export const mockSecurityEvents: SecurityEvent[] = [
     severity: 'medium',
     sourceIp: '198.51.100.77',
     destinationIp: '192.168.1.1',
-    timestamp: '2026-11-16T13:52:44Z',
+    timestamp: minutesAgo(19),
     protocol: 'TCP',
     eventType: 'port_scan',
     resolved: false,
@@ -228,7 +234,7 @@ export const mockSecurityEvents: SecurityEvent[] = [
     severity: 'critical',
     sourceIp: '192.168.1.78',
     destinationIp: '45.33.32.156',
-    timestamp: '2026-11-16T13:30:19Z',
+    timestamp: minutesAgo(41),
     protocol: 'TCP',
     eventType: 'data_exfiltration',
     resolved: false,
@@ -240,7 +246,7 @@ export const mockSecurityEvents: SecurityEvent[] = [
     severity: 'high',
     sourceIp: '203.0.113.99',
     destinationIp: '192.168.1.10',
-    timestamp: '2026-11-16T13:12:03Z',
+    timestamp: minutesAgo(60),
     protocol: 'TCP',
     eventType: 'unauthorized_access',
     resolved: true,
@@ -252,7 +258,7 @@ export const mockSecurityEvents: SecurityEvent[] = [
     severity: 'low',
     sourceIp: '192.168.1.55',
     destinationIp: '198.51.100.14',
-    timestamp: '2026-11-16T12:48:30Z',
+    timestamp: minutesAgo(85),
     protocol: 'HTTP',
     eventType: 'policy_violation',
     resolved: true,
@@ -263,7 +269,7 @@ export const mockSecurityEvents: SecurityEvent[] = [
     description: 'Sample: High-frequency DNS queries to unusual domains from single host.',
     severity: 'medium',
     sourceIp: '192.168.1.102',
-    timestamp: '2026-11-16T12:21:55Z',
+    timestamp: minutesAgo(115),
     protocol: 'DNS',
     eventType: 'anomaly',
     resolved: false,
@@ -279,7 +285,7 @@ export const mockDevices: Device[] = [
     ipAddress: '192.168.1.1',
     macAddress: 'AA:BB:CC:11:22:33',
     deviceType: 'router',
-    lastSeen: '2026-11-16T14:12:00Z',
+    lastSeen: secondsAgo(15),
     isActive: true,
     openPorts: [22, 80, 443, 8080],
     trafficIn: 524_288_000,
@@ -292,7 +298,7 @@ export const mockDevices: Device[] = [
     macAddress: 'DD:EE:FF:44:55:66',
     deviceType: 'workstation',
     operatingSystem: 'Windows 11',
-    lastSeen: '2026-11-16T14:11:52Z',
+    lastSeen: secondsAgo(25),
     isActive: true,
     openPorts: [3389, 445],
     trafficIn: 157_286_400,
@@ -305,7 +311,7 @@ export const mockDevices: Device[] = [
     macAddress: 'GG:HH:II:77:88:99',
     deviceType: 'server',
     operatingSystem: 'Ubuntu 22.04 LTS',
-    lastSeen: '2026-11-16T14:12:10Z',
+    lastSeen: secondsAgo(5),
     isActive: true,
     openPorts: [22, 5432, 6379],
     trafficIn: 838_860_800,
@@ -324,7 +330,7 @@ export const mockConnections: Connection[] = [
     destinationPort: 443,
     protocol: 'HTTPS',
     status: 'active',
-    established: '2026-11-16T14:05:00Z',
+    established: minutesAgo(7),
     duration: 432,
     bytesTransferred: 2_097_152,
   },
@@ -336,7 +342,7 @@ export const mockConnections: Connection[] = [
     destinationPort: 60412,
     protocol: 'TCP',
     status: 'active',
-    established: '2026-11-16T13:50:00Z',
+    established: minutesAgo(22),
     duration: 1320,
     bytesTransferred: 8_388_608,
   },

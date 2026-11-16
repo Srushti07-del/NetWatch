@@ -8,11 +8,13 @@ import { Header } from './Header';
 import { Sidebar } from './Sidebar';
 import type { MonitoringStatus } from '../../types';
 
-const MONITORING_STATUS: MonitoringStatus = 'active';
+const MONITORING_STATUS: MonitoringStatus = 'demo';
 const ALERT_COUNT = 7;
 
 export function AppLayout() {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
+    typeof window !== 'undefined' ? window.innerWidth < 768 : false
+  );
 
   return (
     <div
@@ -28,17 +30,10 @@ export function AppLayout() {
         onToggle={() => setSidebarCollapsed((v) => !v)}
       />
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
         <Header monitoringStatus={MONITORING_STATUS} alertCount={ALERT_COUNT} />
 
-        <main
-          style={{
-            flex: 1,
-            overflowY: 'auto',
-            padding: '24px',
-            background: '#0B1220',
-          }}
-        >
+        <main className="app-main-content">
           <Outlet />
         </main>
       </div>

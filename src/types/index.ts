@@ -114,4 +114,4 @@ export interface SortConfig<T> {
   direction: 'asc' | 'desc';
 }
 
-export type MonitoringStatus = 'active' | 'paused' | 'error' | 'connecting';
+export type MonitoringStatus = 'active' | 'paused' | 'error' | 'connecting' | 'demo';

@@ -22,6 +22,7 @@ export function formatCompact(value: number): string {
 /** Format a UTC ISO timestamp to a readable local time */
 export function formatTimestamp(iso: string): string {
   const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '—';
   return date.toLocaleString(undefined, {
     month: 'short',
     day: '2-digit',
@@ -34,7 +35,11 @@ export function formatTimestamp(iso: string): string {
 
 /** Return "X ago" string from an ISO timestamp */
 export function timeAgo(iso: string): string {
-  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  const time = new Date(iso).getTime();
+  if (Number.isNaN(time)) return 'Just now';
+
+  const seconds = Math.floor((Date.now() - time) / 1000);
+  if (seconds < 10) return 'Just now';
   if (seconds < 60) return `${seconds}s ago`;
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;

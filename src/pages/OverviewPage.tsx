@@ -29,10 +29,11 @@ export function OverviewPage() {
             display: 'flex',
             alignItems: 'center',
             gap: 7,
-            background: 'rgba(16, 185, 129, 0.08)',
-            border: '1px solid rgba(16, 185, 129, 0.2)',
+            background: 'rgba(66, 214, 197, 0.08)',
+            border: '1px solid rgba(66, 214, 197, 0.2)',
             borderRadius: 8,
             padding: '6px 14px',
+            flexShrink: 0,
           }}
         >
           <div
@@ -40,24 +41,18 @@ export function OverviewPage() {
               width: 7,
               height: 7,
               borderRadius: '50%',
-              background: '#10B981',
-              boxShadow: '0 0 6px rgba(16, 185, 129, 0.6)',
+              background: '#42D6C5',
+              boxShadow: '0 0 6px rgba(66, 214, 197, 0.6)',
             }}
           />
-          <span style={{ color: '#10B981', fontSize: 12, fontWeight: 600 }}>
-            Monitoring Active
+          <span style={{ color: '#42D6C5', fontSize: 12, fontWeight: 600 }}>
+            Demo Mode
           </span>
         </div>
       </div>
 
       {/* Metric cards */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-          gap: 16,
-        }}
-      >
+      <div className="dashboard-metrics-grid">
         <MetricCard
           title="Total Packets"
           value={formatCompact(mockMetrics.totalPackets)}
@@ -95,25 +90,13 @@ export function OverviewPage() {
       </div>
 
       {/* Traffic chart + protocol distribution */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 2fr) minmax(0, 1fr)',
-          gap: 16,
-        }}
-      >
+      <div className="dashboard-charts-grid">
         <TrafficChart data={mockTrafficData} />
         <ProtocolChart data={mockProtocolData} />
       </div>
 
       {/* Activity table + security events */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'minmax(0, 3fr) minmax(0, 2fr)',
-          gap: 16,
-        }}
-      >
+      <div className="dashboard-activity-grid">
         <ActivityTable packets={mockPackets} />
         <SecurityEvents events={mockSecurityEvents} />
       </div>
