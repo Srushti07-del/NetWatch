@@ -22,7 +22,7 @@ interface HeaderProps {
 }
 
 const STATUS_LABEL: Record<MonitoringStatus, string> = {
-  active:     'Demo',
+  active:     'API',
   demo:       'Demo',
   paused:     'Paused',
   error:      'Error',
@@ -30,7 +30,7 @@ const STATUS_LABEL: Record<MonitoringStatus, string> = {
 };
 
 const STATUS_COLOR: Record<MonitoringStatus, string> = {
-  active:     '#42D6C5',
+  active:     '#3B82F6',
   demo:       '#42D6C5',
   paused:     '#F59E0B',
   error:      '#EF4444',

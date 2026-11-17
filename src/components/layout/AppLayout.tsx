@@ -7,8 +7,9 @@ import { Outlet } from 'react-router-dom';
 import { Header } from './Header';
 import { Sidebar } from './Sidebar';
 import type { MonitoringStatus } from '../../types';
+import { IS_DEMO_MODE } from '../../services/api';
 
-const MONITORING_STATUS: MonitoringStatus = 'demo';
+const MONITORING_STATUS: MonitoringStatus = IS_DEMO_MODE ? 'demo' : 'active';
 const ALERT_COUNT = 7;
 
 export function AppLayout() {
