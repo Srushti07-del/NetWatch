@@ -29,7 +29,6 @@ import { API_BASE_URL, IS_DEMO_MODE } from '../services/api';
 const STORAGE_KEY = 'netwatch.settings';
 
 interface LocalSettings {
-  theme: 'dark' | 'light';
   tableDensity: 'comfortable' | 'compact';
   notifications: {
     enabled: boolean;
@@ -47,7 +46,6 @@ interface LocalSettings {
 }
 
 const DEFAULT_SETTINGS: LocalSettings = {
-  theme: 'dark',
   tableDensity: 'comfortable',
   notifications: {
     enabled: true,
@@ -105,7 +103,9 @@ export function SettingsPage() {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        setSettings({ ...DEFAULT_SETTINGS, ...parsed });
+        // Strip stale theme property from previously saved settings
+        const { theme: _theme, ...rest } = parsed;
+        setSettings({ ...DEFAULT_SETTINGS, ...rest });
       }
     } catch {
       // Ignore malformed persisted settings; use defaults.
@@ -618,27 +618,6 @@ export function SettingsPage() {
           </div>
         </div>
         <div style={{ padding: 20, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <label style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              Theme
-            </label>
-            <select
-              value={settings.theme}
-              onChange={(e) => setField('theme', e.target.value)}
-              style={{
-                background: '#0D1726',
-                border: '1px solid #1E2D45',
-                borderRadius: 8,
-                color: '#F1F5F9',
-                padding: '8px 12px',
-                fontSize: 13,
-              }}
-            >
-              <option value="dark">Dark</option>
-              <option value="light">Light</option>
-            </select>
-            <span style={{ color: '#94A3B8', fontSize: 11 }}>Persisted locally in browser</span>
-          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <label style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
               Table Density

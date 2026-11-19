@@ -1,20 +1,9 @@
 /**
  * Header.tsx
- * Top application header with page title, status, and user menu.
+ * Top application header with status and user menu.
  */
-import { Bell, ChevronRight, User } from 'lucide-react';
-import { useLocation } from 'react-router-dom';
+import { Bell, User } from 'lucide-react';
 import type { MonitoringStatus } from '../../types';
-
-const PAGE_META: Record<string, { title: string; description: string }> = {
-  '/':              { title: 'Overview',         description: 'Network status at a glance' },
-  '/live-traffic':  { title: 'Live Traffic',     description: 'Real-time packet and flow inspection' },
-  '/devices':       { title: 'Devices',           description: 'Discovered network endpoints' },
-  '/connections':   { title: 'Connections',       description: 'Active and historical network flows' },
-  '/threats':       { title: 'Threat Detection', description: 'Security events and anomaly alerts' },
-  '/analytics':     { title: 'Analytics',         description: 'Traffic patterns and trend analysis' },
-  '/settings':      { title: 'Settings',          description: 'Application and monitoring configuration' },
-};
 
 interface HeaderProps {
   monitoringStatus: MonitoringStatus;
@@ -38,24 +27,10 @@ const STATUS_COLOR: Record<MonitoringStatus, string> = {
 };
 
 export function Header({ monitoringStatus, alertCount }: HeaderProps) {
-  const location = useLocation();
-  const meta = PAGE_META[location.pathname] ?? { title: 'NetWatch', description: '' };
   const color = STATUS_COLOR[monitoringStatus];
 
   return (
     <header className="app-header">
-      {/* Page title */}
-      <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-        <div className="header-breadcrumb" style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-          <span style={{ color: '#94A3B8', fontSize: 12 }}>NetWatch</span>
-          <ChevronRight size={12} color="#64748B" />
-          <span style={{ color: '#F1F5F9', fontSize: 12, fontWeight: 500 }}>{meta.title}</span>
-        </div>
-        <h1 style={{ margin: 0, fontSize: 17, fontWeight: 700, color: '#F1F5F9', lineHeight: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          {meta.title}
-        </h1>
-      </div>
-
       {/* Monitoring status */}
       <div
         style={{
