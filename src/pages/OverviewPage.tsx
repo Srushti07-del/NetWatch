@@ -18,13 +18,13 @@ import type { DashboardMetrics } from '../types';
 
 const EMPTY_METRICS: DashboardMetrics = {
   totalPackets: 0,
-  totalPacketsDelta: 0,
+  totalPacketsDelta: null,
   bandwidthUsage: 0,
   bandwidthPeak: 0,
-  activeDevices: 0,
+  activeDevices: null,
   totalDevices: 0,
-  securityAlerts: 0,
-  criticalAlerts: 0,
+  securityAlerts: null,
+  criticalAlerts: null,
 };
 
 export function OverviewPage() {
@@ -266,8 +266,8 @@ export function OverviewPage() {
           icon={<Package size={18} />}
           iconColor="#42D6C5"
           iconBg="rgba(66, 214, 197, 0.1)"
-          trend={metrics.totalPacketsDelta}
-          trendLabel="vs last hour"
+          trend={metrics.totalPacketsDelta ?? undefined}
+          trendLabel={metrics.totalPacketsDelta !== null ? "vs last hour" : undefined}
         />
         <MetricCard
           title="Bandwidth Usage"
@@ -279,20 +279,20 @@ export function OverviewPage() {
         />
         <MetricCard
           title="Active Devices"
-          value={String(metrics.activeDevices)}
+          value={metrics.activeDevices !== null ? String(metrics.activeDevices) : "N/A"}
           icon={<Cpu size={18} />}
           iconColor="#8B5CF6"
           iconBg="rgba(139, 92, 246, 0.1)"
-          supporting={`${metrics.totalDevices} total registered`}
+          supporting={`${metrics.totalDevices} observed private IPs`}
         />
         <MetricCard
           title="Security Alerts"
-          value={String(metrics.securityAlerts)}
+          value={metrics.securityAlerts !== null ? String(metrics.securityAlerts) : "N/A"}
           icon={<AlertTriangle size={18} />}
           iconColor="#EF4444"
           iconBg="rgba(239, 68, 68, 0.1)"
-          supporting={`${metrics.criticalAlerts} critical`}
-          trend={metrics.securityAlerts > 0 ? metrics.securityAlerts : undefined}
+          supporting={metrics.securityAlerts !== null ? `${metrics.criticalAlerts ?? 0} critical` : "No detection engine"}
+          trend={metrics.securityAlerts !== null && metrics.securityAlerts > 0 ? metrics.securityAlerts : undefined}
         />
       </div>
 

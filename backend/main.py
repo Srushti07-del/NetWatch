@@ -8,7 +8,14 @@ from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from analyzers.packet_analyzer import analyze_packets, MAX_PACKET_LIMIT, DEFAULT_PACKET_LIMIT
-from analyzers.traffic_analyzer import get_dashboard_metrics, get_traffic_data, get_protocol_distribution
+from analyzers.traffic_analyzer import (
+    get_dashboard_metrics,
+    get_traffic_data,
+    get_protocol_distribution,
+    get_devices,
+    get_connections,
+    get_security_events,
+)
 
 BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
 PCAP_PATH = os.path.join(BACKEND_DIR, "captures", "sample.pcapng")
@@ -80,3 +87,39 @@ async def get_protocols_endpoint():
     if protocols is None:
         raise HTTPException(status_code=500, detail="Failed to analyze capture file")
     return protocols
+
+
+@app.get("/api/devices")
+async def get_devices_endpoint():
+    """Return device inventory from the capture analysis."""
+    if not os.path.exists(PCAP_PATH):
+        raise HTTPException(status_code=404, detail="Capture file not found")
+
+    devices = get_devices(PCAP_PATH)
+    if devices is None:
+        raise HTTPException(status_code=500, detail="Failed to analyze capture file")
+    return devices
+
+
+@app.get("/api/connections")
+async def get_connections_endpoint():
+    """Return connection flows from the capture analysis."""
+    if not os.path.exists(PCAP_PATH):
+        raise HTTPException(status_code=404, detail="Capture file not found")
+
+    connections = get_connections(PCAP_PATH)
+    if connections is None:
+        raise HTTPException(status_code=500, detail="Failed to analyze capture file")
+    return connections
+
+
+@app.get("/api/security-events")
+async def get_security_events_endpoint():
+    """Return security events detected in the capture analysis."""
+    if not os.path.exists(PCAP_PATH):
+        raise HTTPException(status_code=404, detail="Capture file not found")
+
+    events = get_security_events(PCAP_PATH)
+    if events is None:
+        raise HTTPException(status_code=500, detail="Failed to analyze capture file")
+    return events

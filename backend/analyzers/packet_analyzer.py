@@ -3,19 +3,17 @@
 Reads a PCAP capture file and returns structured packet data
 that can be consumed by the FastAPI backend.
 
-Packets without an IPv4 layer are handled safely.
+Processes IPv4 and ARP packets. Non-IP/non-ARP packets are handled safely.
 """
 
 import os
 from collections import deque
 from datetime import datetime, timezone
 
-from scapy.all import PcapNgReader, IP, TCP, UDP, ICMP
+from scapy.all import PcapNgReader, IP, TCP, UDP, ICMP, ARP, DNS
 
 # Resolve the capture path relative to this file's location so the script
 # works regardless of the current working directory.
-# File: backend/analyzers/packet_analyzer.py
-# Capture: backend/captures/sample.pcapng
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PCAP_PATH = os.path.join(BASE_DIR, "captures", "sample.pcapng")
 
@@ -53,35 +51,64 @@ def analyze_packets(pcap_path, limit=DEFAULT_PACKET_LIMIT):
         reader = PcapNgReader(pcap_path)
 
         for index, packet in enumerate(reader):
-            # Only process packets that contain an IPv4 layer.
-            # Packets without IPv4 (e.g. ARP) are skipped safely.
-            if not packet.haslayer(IP):
+            # Process IPv4 and ARP packets. Other link-layer frames are skipped safely.
+            if not packet.haslayer(IP) and not packet.haslayer(ARP):
                 continue
 
-            ip_layer = packet[IP]
-            src_ip = ip_layer.src
-            dst_ip = ip_layer.dst
-
-            # Identify the transport protocol and extract ports when available.
             protocol = "Other"
+            src_ip = ""
+            dst_ip = ""
             src_port = 0
             dst_port = 0
+            ttl = None
 
-            if packet.haslayer(TCP):
-                protocol = "TCP"
-                tcp_layer = packet[TCP]
-                src_port = int(tcp_layer.sport)
-                dst_port = int(tcp_layer.dport)
-            elif packet.haslayer(UDP):
-                protocol = "UDP"
-                udp_layer = packet[UDP]
-                src_port = int(udp_layer.sport)
-                dst_port = int(udp_layer.dport)
-            elif packet.haslayer(ICMP):
-                protocol = "ICMP"
+            if packet.haslayer(ARP):
+                protocol = "ARP"
+                arp_layer = packet[ARP]
+                src_ip = str(arp_layer.psrc)
+                dst_ip = str(arp_layer.pdst)
+
+            elif packet.haslayer(IP):
+                ip_layer = packet[IP]
+                src_ip = str(ip_layer.src)
+                dst_ip = str(ip_layer.dst)
+
+                if packet.haslayer(DNS):
+                    protocol = "DNS"
+                    if packet.haslayer(TCP):
+                        src_port = int(packet[TCP].sport)
+                        dst_port = int(packet[TCP].dport)
+                    elif packet.haslayer(UDP):
+                        src_port = int(packet[UDP].sport)
+                        dst_port = int(packet[UDP].dport)
+                elif packet.haslayer(TCP):
+                    tcp_layer = packet[TCP]
+                    src_port = int(tcp_layer.sport)
+                    dst_port = int(tcp_layer.dport)
+                    if src_port == 53 or dst_port == 53:
+                        protocol = "DNS"
+                    elif src_port == 443 or dst_port == 443:
+                        protocol = "HTTPS"
+                    elif src_port == 80 or dst_port == 80:
+                        protocol = "HTTP"
+                    else:
+                        protocol = "TCP"
+                elif packet.haslayer(UDP):
+                    udp_layer = packet[UDP]
+                    src_port = int(udp_layer.sport)
+                    dst_port = int(udp_layer.dport)
+                    if src_port == 53 or dst_port == 53:
+                        protocol = "DNS"
+                    else:
+                        protocol = "UDP"
+                elif packet.haslayer(ICMP):
+                    protocol = "ICMP"
+
+                ip_ttl = getattr(ip_layer, "ttl", None)
+                if ip_ttl is not None:
+                    ttl = int(ip_ttl)
 
             # Get the packet timestamp from Scapy.
-            # Scapy stores the capture time as packet.time (Unix timestamp).
             ts = getattr(packet, "time", None)
             if ts is not None:
                 timestamp = datetime.fromtimestamp(
@@ -92,11 +119,6 @@ def analyze_packets(pcap_path, limit=DEFAULT_PACKET_LIMIT):
 
             # Get the actual packet length in bytes.
             packet_size = int(len(packet))
-
-            # Get the TTL when available.
-            ttl = getattr(ip_layer, "ttl", None)
-            if ttl is not None:
-                ttl = int(ttl)
 
             recent_packets.append({
                 "id": str(index),
@@ -120,7 +142,6 @@ def analyze_packets(pcap_path, limit=DEFAULT_PACKET_LIMIT):
             except Exception:
                 pass
 
-    # Convert deque to list, preserving capture order (oldest to newest within the retained subset).
     return list(recent_packets)
 
 
@@ -134,7 +155,7 @@ def main():
 
     if len(packets) == 0:
         print(
-            "The capture file '{}' is empty or contains no IPv4 packets.".format(
+            "The capture file '{}' is empty or contains no analyzed packets.".format(
                 PCAP_PATH
             )
         )

@@ -29,7 +29,7 @@ export interface Device {
   id: string;
   hostname: string;
   ipAddress: string;
-  macAddress: string;
+  macAddress: string | null;
   deviceType: 'server' | 'workstation' | 'mobile' | 'iot' | 'router' | 'switch' | 'unknown';
   operatingSystem?: string;
   lastSeen: string;
@@ -98,13 +98,13 @@ export interface ProtocolDataPoint {
 
 export interface DashboardMetrics {
   totalPackets: number;
-  totalPacketsDelta: number; // percentage change
+  totalPacketsDelta: number | null; // percentage change or null if unavailable
   bandwidthUsage: number;    // Mbps
   bandwidthPeak: number;     // Mbps
-  activeDevices: number;
+  activeDevices: number | null; // null if unavailable from offline capture
   totalDevices: number;
-  securityAlerts: number;
-  criticalAlerts: number;
+  securityAlerts: number | null; // null if no detection engine implemented
+  criticalAlerts: number | null; // null if no detection engine implemented
 }
 
 // ─── UI State ────────────────────────────────────────────────────────────────

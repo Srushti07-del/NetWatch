@@ -28,8 +28,8 @@ const DEVICE_TYPE_OPTIONS: ReadonlyArray<Device['deviceType'] | 'All'> = [
 ];
 
 const STATUS_STYLES: Record<'active' | 'inactive', { bg: string; color: string; label: string }> = {
-  active:  { bg: 'rgba(16, 185, 129, 0.1)',  color: '#10B981', label: 'Active' },
-  inactive: { bg: 'rgba(239, 68, 68, 0.1)',   color: '#EF4444', label: 'Inactive' },
+  active:   { bg: 'rgba(16, 185, 129, 0.1)',  color: '#10B981', label: 'Presence Confirmed' },
+  inactive: { bg: 'rgba(100, 116, 139, 0.12)', color: '#94A3B8', label: 'Presence Unconfirmed' },
 };
 
 const DEVICE_TYPE_COLORS: Record<Device['deviceType'], { bg: string; color: string }> = {
@@ -144,7 +144,7 @@ export function DevicesPage() {
     : '0 0 6px rgba(59, 130, 246, 0.6)';
   const sampleNote = IS_DEMO_MODE
     ? 'Illustrative sample data — not live network inventory.'
-    : 'Device data from the configured API backend.';
+    : 'Observed device inventory from historical PCAP capture — not live network presence.';
 
   // Reset page when data or filters change
   useEffect(() => {
@@ -160,7 +160,7 @@ export function DevicesPage() {
       const matchesSearch =
         dev.hostname.toLowerCase().includes(q) ||
         dev.ipAddress.toLowerCase().includes(q) ||
-        dev.macAddress.toLowerCase().includes(q);
+        (dev.macAddress?.toLowerCase().includes(q) ?? false);
       const matchesType = deviceTypeFilter === 'All' || dev.deviceType === deviceTypeFilter;
       const matchesStatus = statusFilter === 'All' || (dev.isActive ? 'active' : 'inactive') === statusFilter;
       return matchesSearch && matchesType && matchesStatus;
@@ -228,7 +228,7 @@ export function DevicesPage() {
 
   const handleCopySummary = useCallback(async () => {
     if (!selectedDevice) return;
-    const text = `${selectedDevice.id} | ${selectedDevice.hostname} | ${selectedDevice.ipAddress} | ${selectedDevice.macAddress} | ${selectedDevice.deviceType} | ${selectedDevice.isActive ? 'Active' : 'Inactive'}`;
+    const text = `${selectedDevice.id} | ${selectedDevice.hostname} | ${selectedDevice.ipAddress} | ${selectedDevice.macAddress ?? 'N/A'} | ${selectedDevice.deviceType} | ${selectedDevice.isActive ? 'Presence Confirmed' : 'Presence Unconfirmed'}`;
     if (!navigator.clipboard) {
       setCopyFeedback({ message: 'Clipboard not available', type: 'error' });
       return;
@@ -342,16 +342,16 @@ export function DevicesPage() {
       {/* Summary metrics */}
       <div className="dashboard-metrics-grid">
         <div style={{ background: '#141F30', border: '1px solid #1E2D45', borderRadius: 12, padding: '16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <span style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500 }}>Total Devices</span>
+          <span style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500 }}>Observed Devices</span>
           <span style={{ color: '#F1F5F9', fontSize: 24, fontWeight: 700 }}>{formatCompact(totalDevices)}</span>
         </div>
         <div style={{ background: '#141F30', border: '1px solid #1E2D45', borderRadius: 12, padding: '16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <span style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500 }}>Active</span>
+          <span style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500 }}>Presence Confirmed</span>
           <span style={{ color: '#10B981', fontSize: 24, fontWeight: 700 }}>{formatCompact(activeDevices)}</span>
         </div>
         <div style={{ background: '#141F30', border: '1px solid #1E2D45', borderRadius: 12, padding: '16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <span style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500 }}>Inactive</span>
-          <span style={{ color: '#EF4444', fontSize: 24, fontWeight: 700 }}>{formatCompact(inactiveDevices)}</span>
+          <span style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500 }}>Presence Unconfirmed</span>
+          <span style={{ color: '#94A3B8', fontSize: 24, fontWeight: 700 }}>{formatCompact(inactiveDevices)}</span>
         </div>
       </div>
 
@@ -414,9 +414,9 @@ export function DevicesPage() {
                 cursor: 'pointer',
               }}
             >
-              <option value="All">All Statuses</option>
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
+              <option value="All">All Presence States</option>
+              <option value="active">Presence Confirmed</option>
+              <option value="inactive">Presence Unconfirmed</option>
             </select>
             <button
               onClick={handleClearFilters}
@@ -477,10 +477,10 @@ export function DevicesPage() {
             <div style={{ padding: '16px', borderBottom: '1px solid #1E2D45', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <h3 style={{ margin: 0, color: '#F1F5F9', fontSize: 14, fontWeight: 600 }}>
-                  Device Inventory
+                  Observed Device Inventory
                 </h3>
                 <p style={{ margin: '4px 0 0', color: '#94A3B8', fontSize: 12 }}>
-                  Select a device to view full details
+                  Private unicast endpoints observed in packet capture. Select a device to view full details.
                 </p>
               </div>
               <span style={{ color: '#94A3B8', fontSize: 12 }}>{paginated.length} of {sorted.length} shown</span>
@@ -513,7 +513,7 @@ export function DevicesPage() {
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          Device Name
+                          Device / Host
                           {sort?.key === 'hostname' && (
                             sort.direction === 'asc' ? <ChevronUp size={12} color="#42D6C5" /> : <ChevronDown size={12} color="#42D6C5" />
                           )}
@@ -633,7 +633,7 @@ export function DevicesPage() {
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                          Status
+                          Presence
                           {sort?.key === 'isActive' && (
                             sort.direction === 'asc' ? <ChevronUp size={12} color="#42D6C5" /> : <ChevronDown size={12} color="#42D6C5" />
                           )}
@@ -716,7 +716,7 @@ export function DevicesPage() {
                           {dev.ipAddress}
                         </td>
                         <td style={{ padding: '10px 16px', color: '#94A3B8', fontSize: 12, fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
-                          {dev.macAddress}
+                          {dev.macAddress || '— (Not observed)'}
                         </td>
                         <td style={{ padding: '10px 16px' }}>
                           <span
@@ -879,8 +879,12 @@ export function DevicesPage() {
                 <span style={{ color: '#F1F5F9', fontSize: 13, fontFamily: 'monospace' }}>{selectedDevice.id}</span>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Hostname</span>
-                <span style={{ color: '#F1F5F9', fontSize: 13 }}>{selectedDevice.hostname}</span>
+                <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Hostname / IP Endpoint</span>
+                <span style={{ color: '#F1F5F9', fontSize: 13 }}>
+                  {selectedDevice.hostname === selectedDevice.ipAddress
+                    ? `${selectedDevice.hostname} (No DNS PTR recorded)`
+                    : selectedDevice.hostname}
+                </span>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -889,7 +893,9 @@ export function DevicesPage() {
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>MAC Address</span>
-                  <span style={{ color: '#F1F5F9', fontSize: 13, fontFamily: 'monospace' }}>{selectedDevice.macAddress}</span>
+                  <span style={{ color: '#F1F5F9', fontSize: 13, fontFamily: 'monospace' }}>
+                    {selectedDevice.macAddress || '— (Not observed in capture)'}
+                  </span>
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
@@ -911,7 +917,7 @@ export function DevicesPage() {
                   </span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Status</span>
+                  <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Presence Status</span>
                   <span
                     style={{
                       background: STATUS_STYLES[selectedDevice.isActive ? 'active' : 'inactive'].bg,
@@ -925,6 +931,9 @@ export function DevicesPage() {
                   >
                     {STATUS_STYLES[selectedDevice.isActive ? 'active' : 'inactive'].label}
                   </span>
+                  {!selectedDevice.isActive && (
+                    <span style={{ color: '#64748B', fontSize: 11 }}>Live status unavailable from offline capture</span>
+                  )}
                 </div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -939,11 +948,11 @@ export function DevicesPage() {
               )}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Traffic In</span>
+                  <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Traffic In (Capture)</span>
                   <span style={{ color: '#F1F5F9', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>{formatCompact(selectedDevice.trafficIn)} B</span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Traffic Out</span>
+                  <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Traffic Out (Capture)</span>
                   <span style={{ color: '#F1F5F9', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>{formatCompact(selectedDevice.trafficOut)} B</span>
                 </div>
               </div>

@@ -27,15 +27,11 @@ const PROTOCOL_OPTIONS: ReadonlyArray<Protocol | 'All'> = [
   'All', 'TCP', 'UDP', 'DNS', 'HTTP', 'HTTPS', 'ICMP', 'ARP', 'Other',
 ];
 
-const CONNECTION_STATUS_OPTIONS: ReadonlyArray<ConnectionStatus | 'All'> = [
-  'All', 'active', 'closed', 'timeout', 'refused',
-];
-
 const CONNECTION_STATUS_STYLES: Record<ConnectionStatus, { bg: string; color: string; label: string }> = {
-  active:   { bg: 'rgba(16, 185, 129, 0.1)',  color: '#10B981', label: 'Active' },
-  closed:   { bg: 'rgba(239, 68, 68, 0.1)',   color: '#EF4444', label: 'Closed' },
-  timeout:  { bg: 'rgba(245, 158, 11, 0.1)',  color: '#F59E0B', label: 'Timeout' },
-  refused:  { bg: 'rgba(100, 116, 139, 0.1)', color: '#64748B', label: 'Refused' },
+  active:   { bg: 'rgba(59, 130, 246, 0.12)',  color: '#3B82F6', label: 'Unclosed in Capture' },
+  closed:   { bg: 'rgba(100, 116, 139, 0.12)', color: '#94A3B8', label: 'Closed in Capture' },
+  timeout:  { bg: 'rgba(245, 158, 11, 0.12)',  color: '#F59E0B', label: 'No Response Observed' },
+  refused:  { bg: 'rgba(239, 68, 68, 0.12)',   color: '#EF4444', label: 'Reset / Refused' },
 };
 
 const PROTOCOL_COLORS: Record<Protocol, { bg: string; color: string }> = {
@@ -151,7 +147,7 @@ export function ConnectionsPage() {
     : '0 0 6px rgba(59, 130, 246, 0.6)';
   const sampleNote = IS_DEMO_MODE
     ? 'Illustrative sample data — not live connection monitoring.'
-    : 'Connection data from the configured API backend.';
+    : 'Transport flow records derived from historical PCAP capture — not live streaming.';
 
   // Reset page when data or filters change
   useEffect(() => {
@@ -351,19 +347,19 @@ export function ConnectionsPage() {
       {/* Summary metrics */}
       <div className="dashboard-metrics-grid">
         <div style={{ background: '#141F30', border: '1px solid #1E2D45', borderRadius: 12, padding: '16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <span style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500 }}>Total Connections</span>
+          <span style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500 }}>Observed Flows</span>
           <span style={{ color: '#F1F5F9', fontSize: 24, fontWeight: 700 }}>{formatCompact(totalConnections)}</span>
         </div>
         <div style={{ background: '#141F30', border: '1px solid #1E2D45', borderRadius: 12, padding: '16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <span style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500 }}>Active</span>
-          <span style={{ color: '#10B981', fontSize: 24, fontWeight: 700 }}>{formatCompact(activeConnections)}</span>
+          <span style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500 }}>Unclosed in Capture</span>
+          <span style={{ color: '#3B82F6', fontSize: 24, fontWeight: 700 }}>{formatCompact(activeConnections)}</span>
         </div>
         <div style={{ background: '#141F30', border: '1px solid #1E2D45', borderRadius: 12, padding: '16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <span style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500 }}>Closed</span>
-          <span style={{ color: '#EF4444', fontSize: 24, fontWeight: 700 }}>{formatCompact(closedConnections)}</span>
+          <span style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500 }}>Closed in Capture</span>
+          <span style={{ color: '#94A3B8', fontSize: 24, fontWeight: 700 }}>{formatCompact(closedConnections)}</span>
         </div>
         <div style={{ background: '#141F30', border: '1px solid #1E2D45', borderRadius: 12, padding: '16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <span style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500 }}>Timeout</span>
+          <span style={{ color: '#94A3B8', fontSize: 12, fontWeight: 500 }}>No Response</span>
           <span style={{ color: '#F59E0B', fontSize: 24, fontWeight: 700 }}>{formatCompact(timeoutConnections)}</span>
         </div>
       </div>
@@ -427,11 +423,11 @@ export function ConnectionsPage() {
                 cursor: 'pointer',
               }}
             >
-              {CONNECTION_STATUS_OPTIONS.map((opt) => (
-                <option key={opt} value={opt}>
-                  {opt === 'All' ? 'All Statuses' : opt.charAt(0).toUpperCase() + opt.slice(1)}
-                </option>
-              ))}
+              <option value="All">All Statuses</option>
+              <option value="active">Unclosed in Capture</option>
+              <option value="closed">Closed in Capture</option>
+              <option value="timeout">No Response Observed</option>
+              <option value="refused">Reset / Refused</option>
             </select>
             <button
               onClick={handleClearFilters}
@@ -492,10 +488,10 @@ export function ConnectionsPage() {
             <div style={{ padding: '16px', borderBottom: '1px solid #1E2D45', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <h3 style={{ margin: 0, color: '#F1F5F9', fontSize: 14, fontWeight: 600 }}>
-                  Connection Table
+                  Observed Transport Flows
                 </h3>
                 <p style={{ margin: '4px 0 0', color: '#94A3B8', fontSize: 12 }}>
-                  Select a connection to view full details
+                  Bidirectional TCP and UDP sessions aggregated from capture. Select a flow for details.
                 </p>
               </div>
               <span style={{ color: '#94A3B8', fontSize: 12 }}>{paginated.length} of {sorted.length} shown</span>
@@ -981,8 +977,9 @@ export function ConnectionsPage() {
                 </div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Established</span>
+                <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>First Observed</span>
                 <span style={{ color: '#F1F5F9', fontSize: 13, fontFamily: 'monospace' }}>{formatTimestamp(selectedConnection.established)}</span>
+                <span style={{ color: '#64748B', fontSize: 11 }}>Timestamp of first packet seen in flow (does not prove completed TCP handshake)</span>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
@@ -990,7 +987,7 @@ export function ConnectionsPage() {
                   <span style={{ color: '#F1F5F9', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>{selectedConnection.duration}s</span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Bytes Transferred</span>
+                  <span style={{ color: '#94A3B8', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Bytes Transferred (Bidirectional)</span>
                   <span style={{ color: '#F1F5F9', fontSize: 13, fontVariantNumeric: 'tabular-nums' }}>{formatCompact(selectedConnection.bytesTransferred)} B</span>
                 </div>
               </div>

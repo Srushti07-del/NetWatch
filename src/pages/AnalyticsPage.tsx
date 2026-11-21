@@ -119,7 +119,7 @@ export function AnalyticsPage() {
       `Total Packets: ${formatCompact(metrics?.totalPackets ?? 0)} | ` +
       `Bandwidth: ${metrics?.bandwidthUsage ?? 0} Mbps | ` +
       `Peak: ${metrics?.bandwidthPeak ?? 0} Mbps | ` +
-      `Active Devices: ${metrics?.activeDevices ?? 0}`;
+      `Active Devices: ${metrics?.activeDevices !== null && metrics?.activeDevices !== undefined ? metrics.activeDevices : 'N/A'}`;
     if (!navigator.clipboard) {
       setCopyFeedback({ message: 'Clipboard not available', type: 'error' });
       return;
@@ -277,11 +277,11 @@ export function AnalyticsPage() {
         />
         <MetricCard
           title="Active Devices"
-          value={String(metrics?.activeDevices ?? 0)}
+          value={metrics?.activeDevices !== null && metrics?.activeDevices !== undefined ? String(metrics.activeDevices) : "N/A"}
           icon={<Activity size={18} />}
           iconColor="#8B5CF6"
           iconBg="rgba(139, 92, 246, 0.1)"
-          supporting="Devices in current sample"
+          supporting={`${metrics?.totalDevices ?? 0} observed private IPs`}
         />
         <MetricCard
           title="Observed Packets"
