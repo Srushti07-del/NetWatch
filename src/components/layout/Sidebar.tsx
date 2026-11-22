@@ -15,6 +15,7 @@ import {
   Wifi,
 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
+import { IS_DEMO_MODE } from '../../services/api';
 
 interface NavItem {
   label: string;
@@ -131,11 +132,15 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
               width: 7,
               height: 7,
               borderRadius: '50%',
-              background: '#42D6C5',
-              boxShadow: '0 0 6px rgba(66, 214, 197, 0.6)',
+              background: IS_DEMO_MODE ? '#42D6C5' : '#3B82F6',
+              boxShadow: IS_DEMO_MODE
+                ? '0 0 6px rgba(66, 214, 197, 0.6)'
+                : '0 0 6px rgba(59, 130, 246, 0.6)',
             }}
           />
-          <span style={{ color: '#94A3B8', fontSize: 12 }}>Demo Mode</span>
+          <span style={{ color: '#94A3B8', fontSize: 12 }}>
+            {IS_DEMO_MODE ? 'Demo Mode' : 'API Mode'}
+          </span>
         </div>
       )}
 
