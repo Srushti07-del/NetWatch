@@ -3,16 +3,24 @@
 Provides packet analysis functions for computing dashboard metrics,
 traffic time series, protocol distribution, device inventory, and
 connection flows from PCAP captures.
+
+This module now consumes the shared parsed-capture cache instead of
+parsing PCAP files directly.
 """
 
+import copy
 import ipaddress
 import os
 from collections import defaultdict
 from datetime import datetime, timezone
+from typing import Dict, List, Optional, Any
 
-from scapy.all import PcapNgReader, IP, TCP, UDP, ICMP, ARP, DNS, Ether
-
-from .packet_analyzer import PCAP_PATH, MAX_PACKET_LIMIT, DEFAULT_PACKET_LIMIT
+from .shared_capture import (
+    get_parsed_capture,
+    clear_caches,
+    PacketRecord,
+    ParsedCapture,
+)
 from .security_analyzer import SecurityEventDetector
 
 # Protocol color mapping (matches frontend ProtocolChart)
@@ -39,7 +47,8 @@ PROTOCOL_DISPLAY = {
     "Other": "Other",
 }
 
-# Cache analysis results by file path, mtime, and size to avoid re-reading large PCAPs unnecessarily.
+# Derived analysis cache: key = (pcap_path, mtime_ns, size, file_identity)
+# Value = complete analysis result dict
 _ANALYSIS_CACHE = {}
 
 
@@ -58,296 +67,185 @@ def _is_private_unicast_ip(ip_obj: ipaddress.IPv4Address | ipaddress.IPv6Address
     )
 
 
-def analyze_capture(pcap_path=None):
-    """Perform analysis of a PCAP/PCAPNG capture.
-
-    Processes IPv4 and ARP packets. Non-IP/non-ARP packets are safely skipped.
-    Derives dashboard metrics, hourly traffic series, protocol distribution,
-    device inventory, and connection flows.
-    Caches results by file path, mtime, and file size to avoid unnecessary disk I/O.
-
-    Args:
-        pcap_path: Path to the PCAP/PCAPNG capture file. Defaults to PCAP_PATH.
-
-    Returns:
-        Dictionary with analyzed capture metrics, or None if the file cannot be read.
+def _build_analysis_from_parsed_capture(capture: ParsedCapture) -> Dict[str, Any]:
     """
-    if pcap_path is None:
-        pcap_path = PCAP_PATH
+    Build the complete analysis result from a ParsedCapture.
 
-    if not os.path.exists(pcap_path):
-        return None
+    This function performs all aggregations and derivations that were
+    previously done during the PCAP parse loop.
+    """
+    packets = capture.packets
+    first_ts = capture.first_timestamp
+    last_ts = capture.last_timestamp
+    total_packets = capture.total_packets
+    total_bytes = capture.total_bytes
 
-    try:
-        mtime = os.path.getmtime(pcap_path)
-        fsize = os.path.getsize(pcap_path)
-        cache_key = (pcap_path, mtime, fsize)
-        if cache_key in _ANALYSIS_CACHE:
-            return _ANALYSIS_CACHE[cache_key]
-    except OSError:
-        cache_key = None
+    # Aggregation containers
+    protocol_counts = defaultdict(int)
+    protocol_bytes = defaultdict(int)
 
-    reader = None
-    try:
-        reader = PcapNgReader(pcap_path)
+    # Store packet timestamps and sizes for discrete 1-second bin peak calculation
+    packet_samples = []
 
-        protocol_counts = defaultdict(int)
-        protocol_bytes = defaultdict(int)
+    # Unique IP addresses
+    all_observed_ips = set()
+    observed_private_unicast_ips = set()
 
-        first_ts = None
-        last_ts = None
-        total_packets = 0
-        total_bytes = 0
+    # Device inventory tracking
+    device_first_seen = {}
+    device_last_seen = {}
+    device_traffic_in = defaultdict(int)
+    device_traffic_out = defaultdict(int)
+    device_pkts_in = defaultdict(int)
+    device_pkts_out = defaultdict(int)
+    device_macs = {}
+    device_open_ports = defaultdict(set)
+    device_protocols = defaultdict(set)
 
-        # Store packet timestamps and sizes for discrete 1-second bin peak calculation
-        packet_samples = []
+    # Connection flow tracking (bidirectional conversation sessions)
+    # Key: (min(endpoint_a, endpoint_b), max(endpoint_a, endpoint_b), transport_type)
+    flow_records = {}
 
-        # Unique IP addresses
-        all_observed_ips = set()
-        observed_private_unicast_ips = set()
+    # Directional bytes per hourly bucket (hour 0..23)
+    hourly_incoming_bytes = defaultdict(int)
+    hourly_outgoing_bytes = defaultdict(int)
+    ambiguous_traffic_bytes = 0
 
-        # Device inventory tracking
-        device_first_seen = {}
-        device_last_seen = {}
-        device_traffic_in = defaultdict(int)
-        device_traffic_out = defaultdict(int)
-        device_pkts_in = defaultdict(int)
-        device_pkts_out = defaultdict(int)
-        device_macs = {}
-        device_open_ports = defaultdict(set)
-        device_protocols = defaultdict(set)
+    # Security event detector (heuristic reconnaissance detection)
+    security_detector = SecurityEventDetector()
 
-        # Connection flow tracking (bidirectional conversation sessions)
-        # Key: (min(endpoint_a, endpoint_b), max(endpoint_a, endpoint_b), transport_type)
-        flow_records = {}
+    # Iterate over pre-parsed packets
+    for pkt in packets:
+        packet_size = pkt.packet_size
+        ts_float = pkt.timestamp if pkt.timestamp > 0 else None
 
-        # Directional bytes per hourly bucket (hour 0..23)
-        hourly_incoming_bytes = defaultdict(int)
-        hourly_outgoing_bytes = defaultdict(int)
-        ambiguous_traffic_bytes = 0
+        protocol_counts[pkt.protocol] += 1
+        protocol_bytes[pkt.protocol] += packet_size
 
-        # Security event detector (heuristic reconnaissance detection)
-        security_detector = SecurityEventDetector()
+        if ts_float is not None:
+            packet_samples.append((ts_float, packet_size))
 
-        for packet in reader:
-            # Analyze IPv4 and ARP packets. Other link-layer or non-IPv4 frames are safely skipped.
-            if not packet.haslayer(IP) and not packet.haslayer(ARP):
-                continue
+        # Protocol classification already done in shared capture
+        protocol = pkt.protocol
+        transport_type = pkt.transport_type
+        src_ip_str = pkt.source_ip
+        dst_ip_str = pkt.destination_ip
+        src_port = pkt.source_port
+        dst_port = pkt.destination_port
+        tcp_flags = pkt.tcp_flags
 
-            packet_size = len(packet)
-            total_bytes += packet_size
-            total_packets += 1
+        # MAC addresses from shared capture
+        eth_src = pkt.eth_src
+        eth_dst = pkt.eth_dst
 
-            # Extract timestamp
-            ts = getattr(packet, "time", None)
-            ts_float = float(ts) if ts is not None else None
-            if ts_float is not None:
-                if first_ts is None or ts_float < first_ts:
-                    first_ts = ts_float
-                if last_ts is None or ts_float > last_ts:
-                    last_ts = ts_float
-                packet_samples.append((ts_float, packet_size))
+        # Device metric analysis
+        src_addr = None
+        dst_addr = None
 
-            # Layer 2 MAC addresses
-            eth_src = str(packet[Ether].src) if packet.haslayer(Ether) else None
-            eth_dst = str(packet[Ether].dst) if packet.haslayer(Ether) else None
+        if src_ip_str:
+            try:
+                src_addr = ipaddress.ip_address(src_ip_str)
+                all_observed_ips.add(src_ip_str)
+                if _is_private_unicast_ip(src_addr):
+                    observed_private_unicast_ips.add(src_ip_str)
+                    device_traffic_out[src_ip_str] += packet_size
+                    device_pkts_out[src_ip_str] += 1
+                    device_protocols[src_ip_str].add(protocol)
+                    if eth_src and src_ip_str not in device_macs:
+                        device_macs[src_ip_str] = eth_src.upper()
+                    if ts_float is not None:
+                        if src_ip_str not in device_first_seen or ts_float < device_first_seen[src_ip_str]:
+                            device_first_seen[src_ip_str] = ts_float
+                        if src_ip_str not in device_last_seen or ts_float > device_last_seen[src_ip_str]:
+                            device_last_seen[src_ip_str] = ts_float
+            except ValueError:
+                pass
 
-            # Protocol classification & IP extraction
-            protocol = "Other"
-            transport_type = None
-            src_ip_str = None
-            dst_ip_str = None
-            src_port = 0
-            dst_port = 0
-            tcp_flags = ""
+        if dst_ip_str:
+            try:
+                dst_addr = ipaddress.ip_address(dst_ip_str)
+                all_observed_ips.add(dst_ip_str)
+                if _is_private_unicast_ip(dst_addr):
+                    observed_private_unicast_ips.add(dst_ip_str)
+                    device_traffic_in[dst_ip_str] += packet_size
+                    device_pkts_in[dst_ip_str] += 1
+                    device_protocols[dst_ip_str].add(protocol)
+                    if eth_dst and dst_ip_str not in device_macs and eth_dst != "FF:FF:FF:FF:FF:FF":
+                        device_macs[dst_ip_str] = eth_dst.upper()
+                    # Record listening/service port if destination received service traffic
+                    if dst_port == 53 or (0 < dst_port < 1024):
+                        device_open_ports[dst_ip_str].add(dst_port)
+                    if ts_float is not None:
+                        if dst_ip_str not in device_first_seen or ts_float < device_first_seen[dst_ip_str]:
+                            device_first_seen[dst_ip_str] = ts_float
+                        if dst_ip_str not in device_last_seen or ts_float > device_last_seen[dst_ip_str]:
+                            device_last_seen[dst_ip_str] = ts_float
+            except ValueError:
+                pass
 
-            if packet.haslayer(ARP):
-                protocol = "ARP"
-                arp_layer = packet[ARP]
-                src_ip_str = str(arp_layer.psrc)
-                dst_ip_str = str(arp_layer.pdst)
-                if arp_layer.hwsrc:
-                    eth_src = str(arp_layer.hwsrc)
-                if arp_layer.hwdst and str(arp_layer.hwdst) != "00:00:00:00:00:00":
-                    eth_dst = str(arp_layer.hwdst)
-
-            elif packet.haslayer(IP):
-                ip_layer = packet[IP]
-                src_ip_str = str(ip_layer.src)
-                dst_ip_str = str(ip_layer.dst)
-
-                # Protocol identification:
-                if packet.haslayer(DNS):
-                    protocol = "DNS"
-                    if packet.haslayer(TCP):
-                        transport_type = "TCP"
-                        src_port = int(packet[TCP].sport)
-                        dst_port = int(packet[TCP].dport)
-                        tcp_flags = str(packet[TCP].flags)
-                    elif packet.haslayer(UDP):
-                        transport_type = "UDP"
-                        src_port = int(packet[UDP].sport)
-                        dst_port = int(packet[UDP].dport)
-                elif packet.haslayer(TCP):
-                    transport_type = "TCP"
-                    tcp_layer = packet[TCP]
-                    src_port = int(tcp_layer.sport)
-                    dst_port = int(tcp_layer.dport)
-                    tcp_flags = str(tcp_layer.flags)
-                    if src_port == 53 or dst_port == 53:
-                        protocol = "DNS"
-                    elif src_port == 443 or dst_port == 443:
-                        protocol = "HTTPS"
-                    elif src_port == 80 or dst_port == 80:
-                        protocol = "HTTP"
-                    else:
-                        protocol = "TCP"
-                elif packet.haslayer(UDP):
-                    transport_type = "UDP"
-                    udp_layer = packet[UDP]
-                    src_port = int(udp_layer.sport)
-                    dst_port = int(udp_layer.dport)
-                    if src_port == 53 or dst_port == 53:
-                        protocol = "DNS"
-                    else:
-                        protocol = "UDP"
-                elif packet.haslayer(ICMP):
-                    protocol = "ICMP"
-                    transport_type = "ICMP"
-
-            protocol_counts[protocol] += 1
-            protocol_bytes[protocol] += packet_size
-
-            # Device metric analysis:
-            # Evaluates endpoints with ipaddress module, excluding loopback, multicast, broadcast, and unspecified.
-            # Traffic definitions:
-            #   - trafficOut: captured packet wire bytes whose source IP is the device.
-            #   - trafficIn: captured packet wire bytes whose destination IP is the device.
-            # Each packet is assigned strictly by endpoint role; no packet is double-counted within an individual device's total.
-            src_addr = None
-            dst_addr = None
-
-            if src_ip_str:
-                try:
-                    src_addr = ipaddress.ip_address(src_ip_str)
-                    all_observed_ips.add(src_ip_str)
-                    if _is_private_unicast_ip(src_addr):
-                        observed_private_unicast_ips.add(src_ip_str)
-                        device_traffic_out[src_ip_str] += packet_size
-                        device_pkts_out[src_ip_str] += 1
-                        device_protocols[src_ip_str].add(protocol)
-                        if eth_src and src_ip_str not in device_macs:
-                            device_macs[src_ip_str] = eth_src.upper()
-                        if ts_float is not None:
-                            if src_ip_str not in device_first_seen or ts_float < device_first_seen[src_ip_str]:
-                                device_first_seen[src_ip_str] = ts_float
-                            if src_ip_str not in device_last_seen or ts_float > device_last_seen[src_ip_str]:
-                                device_last_seen[src_ip_str] = ts_float
-                except ValueError:
-                    pass
-
-            if dst_ip_str:
-                try:
-                    dst_addr = ipaddress.ip_address(dst_ip_str)
-                    all_observed_ips.add(dst_ip_str)
-                    if _is_private_unicast_ip(dst_addr):
-                        observed_private_unicast_ips.add(dst_ip_str)
-                        device_traffic_in[dst_ip_str] += packet_size
-                        device_pkts_in[dst_ip_str] += 1
-                        device_protocols[dst_ip_str].add(protocol)
-                        if eth_dst and dst_ip_str not in device_macs and eth_dst != "FF:FF:FF:FF:FF:FF":
-                            device_macs[dst_ip_str] = eth_dst.upper()
-                        # Record listening/service port if destination received service traffic (e.g. port 53, or < 1024)
-                        if dst_port == 53 or (0 < dst_port < 1024):
-                            device_open_ports[dst_ip_str].add(dst_port)
-                        if ts_float is not None:
-                            if dst_ip_str not in device_first_seen or ts_float < device_first_seen[dst_ip_str]:
-                                device_first_seen[dst_ip_str] = ts_float
-                            if dst_ip_str not in device_last_seen or ts_float > device_last_seen[dst_ip_str]:
-                                device_last_seen[dst_ip_str] = ts_float
-                except ValueError:
-                    pass
-
-            # Directional classification:
-            # Boundary heuristic:
-            #   - Private source -> Public destination: outgoing
-            #   - Public source  -> Private destination: incoming
-            # Ambiguous traffic:
-            #   - Both private (internal LAN) or both public: direction cannot be established
-            #     without internal routing context. Excluded from directional totals.
-            if ts_float is not None:
-                hour = datetime.fromtimestamp(ts_float, tz=timezone.utc).hour
-                if src_addr is not None and dst_addr is not None:
-                    if src_addr.is_private and not dst_addr.is_private:
-                        hourly_outgoing_bytes[hour] += packet_size
-                    elif not src_addr.is_private and dst_addr.is_private:
-                        hourly_incoming_bytes[hour] += packet_size
-                    else:
-                        ambiguous_traffic_bytes += packet_size
+        # Directional classification
+        if ts_float is not None:
+            hour = datetime.fromtimestamp(ts_float, tz=timezone.utc).hour
+            if src_addr is not None and dst_addr is not None:
+                if src_addr.is_private and not dst_addr.is_private:
+                    hourly_outgoing_bytes[hour] += packet_size
+                elif not src_addr.is_private and dst_addr.is_private:
+                    hourly_incoming_bytes[hour] += packet_size
                 else:
                     ambiguous_traffic_bytes += packet_size
+            else:
+                ambiguous_traffic_bytes += packet_size
 
-            # Connection / Flow analysis (TCP and UDP flows):
-            # Defined by 5-tuple: (source IP, destination IP, source port, destination port, transport protocol).
-            # Reverse-direction packets are grouped into the same session to avoid double-counting.
-            if transport_type in ("TCP", "UDP") and src_ip_str and dst_ip_str:
-                ep_src = (src_ip_str, src_port)
-                ep_dst = (dst_ip_str, dst_port)
-                canon_key = (min(ep_src, ep_dst), max(ep_src, ep_dst), transport_type)
+        # Connection / Flow analysis (TCP and UDP flows)
+        if transport_type in ("TCP", "UDP") and src_ip_str and dst_ip_str:
+            ep_src = (src_ip_str, src_port)
+            ep_dst = (dst_ip_str, dst_port)
+            canon_key = (min(ep_src, ep_dst), max(ep_src, ep_dst), transport_type)
 
-                if canon_key not in flow_records:
-                    flow_records[canon_key] = {
-                        "initiator": ep_src,
-                        "responder": ep_dst,
-                        "protocol": protocol,
-                        "transport_type": transport_type,
-                        "first_ts": ts_float,
-                        "last_ts": ts_float,
-                        "bytes": packet_size,
-                        "packets": 1,
-                        "flags": set([tcp_flags]) if tcp_flags else set(),
-                        "fwd_packets": 1,
-                        "rev_packets": 0,
-                    }
+            if canon_key not in flow_records:
+                flow_records[canon_key] = {
+                    "initiator": ep_src,
+                    "responder": ep_dst,
+                    "protocol": protocol,
+                    "transport_type": transport_type,
+                    "first_ts": ts_float,
+                    "last_ts": ts_float,
+                    "bytes": packet_size,
+                    "packets": 1,
+                    "flags": set([tcp_flags]) if tcp_flags else set(),
+                    "fwd_packets": 1,
+                    "rev_packets": 0,
+                }
+            else:
+                flow = flow_records[canon_key]
+                flow["bytes"] += packet_size
+                flow["packets"] += 1
+                if ts_float is not None:
+                    if flow["first_ts"] is None or ts_float < flow["first_ts"]:
+                        flow["first_ts"] = ts_float
+                    if flow["last_ts"] is None or ts_float > flow["last_ts"]:
+                        flow["last_ts"] = ts_float
+                if tcp_flags:
+                    flow["flags"].add(tcp_flags)
+                    # Explicit SYN packet without ACK reliably identifies the true client initiator
+                    if "S" in tcp_flags and "A" not in tcp_flags:
+                        flow["initiator"] = ep_src
+                        flow["responder"] = ep_dst
+
+                if ep_src == flow["initiator"]:
+                    flow["fwd_packets"] += 1
                 else:
-                    flow = flow_records[canon_key]
-                    flow["bytes"] += packet_size
-                    flow["packets"] += 1
-                    if ts_float is not None:
-                        if flow["first_ts"] is None or ts_float < flow["first_ts"]:
-                            flow["first_ts"] = ts_float
-                        if flow["last_ts"] is None or ts_float > flow["last_ts"]:
-                            flow["last_ts"] = ts_float
-                    if tcp_flags:
-                        flow["flags"].add(tcp_flags)
-                        # Explicit SYN packet without ACK reliably identifies the true client initiator
-                        if "S" in tcp_flags and "A" not in tcp_flags:
-                            flow["initiator"] = ep_src
-                            flow["responder"] = ep_dst
+                    flow["rev_packets"] += 1
 
-                    if ep_src == flow["initiator"]:
-                        flow["fwd_packets"] += 1
-                    else:
-                        flow["rev_packets"] += 1
+                # Refine generic TCP/UDP protocol name if application protocol becomes known
+                if flow["protocol"] in ("TCP", "UDP") and protocol not in ("TCP", "UDP"):
+                    flow["protocol"] = protocol
 
-                    # Refine generic TCP/UDP protocol name if application protocol becomes known
-                    if flow["protocol"] in ("TCP", "UDP") and protocol not in ("TCP", "UDP"):
-                        flow["protocol"] = protocol
-
-            # Security detection tracking
-            if transport_type == "TCP" and src_ip_str and dst_ip_str:
-                security_detector.observe_tcp(ts_float, src_ip_str, dst_ip_str, src_port, dst_port, tcp_flags)
-            elif transport_type == "UDP" and src_ip_str and dst_ip_str:
-                security_detector.observe_udp(ts_float, src_ip_str, dst_ip_str, src_port, dst_port)
-
-    except Exception:
-        return None
-    finally:
-        if reader is not None:
-            try:
-                reader.close()
-            except Exception:
-                pass
+        # Security detection tracking
+        if transport_type == "TCP" and src_ip_str and dst_ip_str:
+            security_detector.observe_tcp(ts_float, src_ip_str, dst_ip_str, src_port, dst_port, tcp_flags)
+        elif transport_type == "UDP" and src_ip_str and dst_ip_str:
+            security_detector.observe_udp(ts_float, src_ip_str, dst_ip_str, src_port, dst_port)
 
     # 1. Average Bandwidth:
     if first_ts is not None and last_ts is not None and last_ts > first_ts:
@@ -432,9 +330,6 @@ def analyze_capture(pcap_path=None):
             )
 
     # 5. Device Inventory:
-    # Derived from unique observed private unicast IP addresses.
-    # Offline captures cannot confirm live state, so isActive is False.
-    # Hostnames, OS, and device types are not fabricated.
     devices = []
     for idx, ip_str in enumerate(sorted(observed_private_unicast_ips)):
         last_s = device_last_seen.get(ip_str, first_ts)
@@ -460,9 +355,6 @@ def analyze_capture(pcap_path=None):
         )
 
     # 6. Connection Flows:
-    # Flows derived from transport layer sessions (TCP and UDP).
-    # Group reverse-direction packets into the same connection session.
-    # Orient initiator (client) as sourceIp and responder (service/server) as destinationIp.
     connections = []
     sorted_flows = sorted(
         flow_records.values(),
@@ -484,10 +376,6 @@ def analyze_capture(pcap_path=None):
             dst_ip, d_port = resp_ip, resp_port
 
         # Connection status determination based on evidence:
-        # - active: unclosed in the capture (no FIN or RST observed before capture end)
-        # - closed: teardown evidence observed (FIN exchange or TCP RST session teardown; completed UDP transaction)
-        # - refused: only when a SYN handshake attempt is rejected by RST without establishing
-        # - timeout: unanswered UDP transaction (no response observed in capture)
         if flow["transport_type"] == "TCP":
             flags = flow["flags"]
             has_rst = any("R" in fl for fl in flags)
@@ -543,7 +431,7 @@ def analyze_capture(pcap_path=None):
     # 7. Security Events Detection:
     security_events = security_detector.evaluate()
 
-    result = {
+    return {
         "total_packets": total_packets,
         "total_bytes": total_bytes,
         "duration_seconds": duration_seconds,
@@ -558,14 +446,11 @@ def analyze_capture(pcap_path=None):
         "first_timestamp": first_ts,
         "last_timestamp": last_ts,
         "dashboard_metrics": {
-            # totalPackets: IPv4 + ARP packets analyzed (excludes IPv6 and other non-IP frames,
-            # which are skipped during analysis since they carry no L3 routing information
-            # relevant to the network inventory or traffic flows being measured).
             "totalPackets": total_packets,
-            "totalPacketsDelta": None,  # Unavailable without historical baseline
+            "totalPacketsDelta": None,
             "bandwidthUsage": round(avg_mbps, 4),
             "bandwidthPeak": round(peak_mbps, 4),
-            "activeDevices": None,      # Unavailable from offline PCAP
+            "activeDevices": None,
             "totalDevices": len(observed_private_unicast_ips),
             "securityAlerts": len(security_events),
             "criticalAlerts": sum(1 for e in security_events if e["severity"] == "critical"),
@@ -577,6 +462,47 @@ def analyze_capture(pcap_path=None):
         "security_events": security_events,
     }
 
+
+def analyze_capture(pcap_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Perform analysis of a PCAP/PCAPNG capture using shared parsed capture.
+
+    Processes IPv4 and ARP packets. Non-IP/non-ARP packets are safely skipped.
+    Derives dashboard metrics, hourly traffic series, protocol distribution,
+    device inventory, and connection flows.
+    Caches derived results by file fingerprint to avoid recomputation.
+
+    Args:
+        pcap_path: Path to the PCAP/PCAPNG capture file.
+
+    Returns:
+        Dictionary with analyzed capture metrics, or None if the file cannot be read.
+    """
+    from .shared_capture import _get_cache_key
+
+    if pcap_path is None:
+        from .packet_analyzer import PCAP_PATH
+        pcap_path = PCAP_PATH
+
+    if not os.path.exists(pcap_path):
+        return None
+
+    # Get cache key for derived result cache (same fingerprint as shared cache)
+    try:
+        cache_key = _get_cache_key(pcap_path)
+        if cache_key is not None and cache_key in _ANALYSIS_CACHE:
+            return _ANALYSIS_CACHE[cache_key]
+    except OSError:
+        cache_key = None
+
+    # Get parsed capture from shared cache (handles parsing, caching, synchronization)
+    capture = get_parsed_capture(pcap_path)
+    if capture is None:
+        return None
+
+    # Build analysis from parsed capture
+    result = _build_analysis_from_parsed_capture(capture)
+
+    # Cache derived result
     if cache_key is not None:
         _ANALYSIS_CACHE.clear()
         _ANALYSIS_CACHE[cache_key] = result
@@ -584,49 +510,53 @@ def analyze_capture(pcap_path=None):
     return result
 
 
-def get_dashboard_metrics(pcap_path=None):
+def get_dashboard_metrics(pcap_path: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Get dashboard metrics from capture analysis."""
     result = analyze_capture(pcap_path)
     if result is None:
         return None
-    return result["dashboard_metrics"]
+    return copy.deepcopy(result["dashboard_metrics"])
 
 
-def get_traffic_data(pcap_path=None):
+def get_traffic_data(pcap_path: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
     """Get traffic time series data from capture analysis."""
     result = analyze_capture(pcap_path)
     if result is None:
         return None
-    return result["traffic_data"]
+    return copy.deepcopy(result["traffic_data"])
 
 
-def get_protocol_distribution(pcap_path=None):
+def get_protocol_distribution(pcap_path: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
     """Get protocol distribution from capture analysis."""
     result = analyze_capture(pcap_path)
     if result is None:
         return None
-    return result["protocol_data"]
+    return copy.deepcopy(result["protocol_data"])
 
 
-def get_devices(pcap_path=None):
+def get_devices(pcap_path: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
     """Get device inventory from capture analysis."""
     result = analyze_capture(pcap_path)
     if result is None:
         return None
-    return result["devices"]
+    return copy.deepcopy(result["devices"])
 
 
-def get_connections(pcap_path=None):
+def get_connections(pcap_path: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
     """Get connection flows from capture analysis."""
     result = analyze_capture(pcap_path)
     if result is None:
         return None
-    return result["connections"]
+    return copy.deepcopy(result["connections"])
 
 
-def get_security_events(pcap_path=None):
+def get_security_events(pcap_path: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
     """Get security events from capture analysis."""
     result = analyze_capture(pcap_path)
     if result is None:
         return None
-    return result.get("security_events", [])
+    return copy.deepcopy(result.get("security_events", []))
+
+
+# For backward compatibility with packet_analyzer import
+from .packet_analyzer import PCAP_PATH, MAX_PACKET_LIMIT, DEFAULT_PACKET_LIMIT
