@@ -1,0 +1,323 @@
+{
+  "cold_results": [
+    {
+      "endpoint": "/api/dashboard/metrics",
+      "method": "GET",
+      "status": 200,
+      "response_size_bytes": 168,
+      "response_size_kb": 0.16,
+      "elapsed_ms": 5590.67,
+      "cache_state": "cold"
+    },
+    {
+      "endpoint": "/api/traffic",
+      "method": "GET",
+      "status": 200,
+      "response_size_bytes": 1133,
+      "response_size_kb": 1.11,
+      "elapsed_ms": 8.39,
+      "cache_state": "cold"
+    },
+    {
+      "endpoint": "/api/protocols",
+      "method": "GET",
+      "status": 200,
+      "response_size_bytes": 201,
+      "response_size_kb": 0.2,
+      "elapsed_ms": 18.27,
+      "cache_state": "cold"
+    },
+    {
+      "endpoint": "/api/packets?limit=100",
+      "method": "GET",
+      "status": 200,
+      "response_size_bytes": 22840,
+      "response_size_kb": 22.3,
+      "elapsed_ms": 12.11,
+      "cache_state": "cold"
+    },
+    {
+      "endpoint": "/api/security-events",
+      "method": "GET",
+      "status": 200,
+      "response_size_bytes": 2,
+      "response_size_kb": 0.0,
+      "elapsed_ms": 32.39,
+      "cache_state": "cold"
+    },
+    {
+      "endpoint": "/api/devices",
+      "method": "GET",
+      "status": 200,
+      "response_size_bytes": 487,
+      "response_size_kb": 0.48,
+      "elapsed_ms": 28.48,
+      "cache_state": "cold"
+    },
+    {
+      "endpoint": "/api/connections",
+      "method": "GET",
+      "status": 200,
+      "response_size_bytes": 11025,
+      "response_size_kb": 10.77,
+      "elapsed_ms": 26.9,
+      "cache_state": "cold"
+    }
+  ],
+  "warm_results": [
+    {
+      "endpoint": "/api/dashboard/metrics",
+      "method": "GET",
+      "status": 200,
+      "response_size_bytes": 168,
+      "response_size_kb": 0.16,
+      "avg_ms": 15.9,
+      "median_ms": 18.42,
+      "stdev_ms": 10.52,
+      "min_ms": 3.95,
+      "max_ms": 30.63,
+      "times_ms": [
+        28.73,
+        21.83,
+        30.63,
+        22.4,
+        3.95,
+        4.37,
+        15.59,
+        21.25,
+        5.25,
+        4.97
+      ],
+      "cache_state": "warm"
+    },
+    {
+      "endpoint": "/api/traffic",
+      "method": "GET",
+      "status": 200,
+      "response_size_bytes": 1133,
+      "response_size_kb": 1.11,
+      "avg_ms": 15.79,
+      "median_ms": 18.86,
+      "stdev_ms": 8.73,
+      "min_ms": 5.78,
+      "max_ms": 30.82,
+      "times_ms": [
+        17.78,
+        6.17,
+        5.78,
+        20.17,
+        19.95,
+        21.88,
+        6.3,
+        21.44,
+        30.82,
+        7.6
+      ],
+      "cache_state": "warm"
+    },
+    {
+      "endpoint": "/api/protocols",
+      "method": "GET",
+      "status": 200,
+      "response_size_bytes": 201,
+      "response_size_kb": 0.2,
+      "avg_ms": 14.56,
+      "median_ms": 17.5,
+      "stdev_ms": 7.27,
+      "min_ms": 3.93,
+      "max_ms": 21.56,
+      "times_ms": [
+        12.29,
+        6.58,
+        20.2,
+        20.9,
+        21.56,
+        20.76,
+        20.06,
+        14.95,
+        3.93,
+        4.35
+      ],
+      "cache_state": "warm"
+    },
+    {
+      "endpoint": "/api/packets?limit=100",
+      "method": "GET",
+      "status": 200,
+      "response_size_bytes": 22840,
+      "response_size_kb": 22.3,
+      "avg_ms": 17.11,
+      "median_ms": 15.35,
+      "stdev_ms": 9.84,
+      "min_ms": 7.11,
+      "max_ms": 32.3,
+      "times_ms": [
+        20.23,
+        7.11,
+        9.32,
+        32.3,
+        21.12,
+        22.55,
+        31.82,
+        8.75,
+        10.48,
+        7.43
+      ],
+      "cache_state": "warm"
+    },
+    {
+      "endpoint": "/api/security-events",
+      "method": "GET",
+      "status": 200,
+      "response_size_bytes": 2,
+      "response_size_kb": 0.0,
+      "avg_ms": 16.58,
+      "median_ms": 19.73,
+      "stdev_ms": 8.74,
+      "min_ms": 4.55,
+      "max_ms": 30.32,
+      "times_ms": [
+        14.95,
+        22.35,
+        19.82,
+        22.85,
+        20.32,
+        5.36,
+        4.55,
+        19.64,
+        5.66,
+        30.32
+      ],
+      "cache_state": "warm"
+    },
+    {
+      "endpoint": "/api/devices",
+      "method": "GET",
+      "status": 200,
+      "response_size_bytes": 487,
+      "response_size_kb": 0.48,
+      "avg_ms": 15.62,
+      "median_ms": 19.57,
+      "stdev_ms": 6.66,
+      "min_ms": 6.15,
+      "max_ms": 21.33,
+      "times_ms": [
+        14.87,
+        20.03,
+        21.33,
+        20.54,
+        6.63,
+        6.2,
+        19.34,
+        21.31,
+        19.79,
+        6.15
+      ],
+      "cache_state": "warm"
+    },
+    {
+      "endpoint": "/api/connections",
+      "method": "GET",
+      "status": 200,
+      "response_size_bytes": 11025,
+      "response_size_kb": 10.77,
+      "avg_ms": 19.9,
+      "median_ms": 20.29,
+      "stdev_ms": 8.68,
+      "min_ms": 7.53,
+      "max_ms": 33.13,
+      "times_ms": [
+        33.13,
+        16.39,
+        26.56,
+        21.56,
+        20.76,
+        14.11,
+        8.27,
+        7.53,
+        19.81,
+        30.89
+      ],
+      "cache_state": "warm"
+    }
+  ],
+  "serialization_results": {
+    "dashboard_metrics": {
+      "json_size_bytes": 183,
+      "json_size_kb": 0.18,
+      "serialize_ms": 0.05,
+      "deserialize_ms": 0.05,
+      "total_serde_ms": 0.09
+    },
+    "traffic_data": {
+      "json_size_bytes": 1276,
+      "json_size_kb": 1.25,
+      "serialize_ms": 0.05,
+      "deserialize_ms": 0.04,
+      "total_serde_ms": 0.09
+    },
+    "protocol_data": {
+      "json_size_bytes": 224,
+      "json_size_kb": 0.22,
+      "serialize_ms": 0.02,
+      "deserialize_ms": 0.02,
+      "total_serde_ms": 0.03
+    },
+    "devices": {
+      "json_size_bytes": 526,
+      "json_size_kb": 0.51,
+      "serialize_ms": 0.02,
+      "deserialize_ms": 0.02,
+      "total_serde_ms": 0.04
+    },
+    "connections": {
+      "json_size_bytes": 11944,
+      "json_size_kb": 11.66,
+      "serialize_ms": 0.13,
+      "deserialize_ms": 0.18,
+      "total_serde_ms": 0.31
+    },
+    "security_events": {
+      "json_size_bytes": 2,
+      "json_size_kb": 0.0,
+      "serialize_ms": 0.01,
+      "deserialize_ms": 0.0,
+      "total_serde_ms": 0.01
+    },
+    "packets": {
+      "json_size_bytes": 24839,
+      "json_size_kb": 24.26,
+      "serialize_ms": 0.19,
+      "deserialize_ms": 1.1,
+      "total_serde_ms": 1.29
+    }
+  },
+  "cache_stats": {
+    "shared_cache": {
+      "entries": 1,
+      "total_packets": 934,
+      "max_entries": 32,
+      "max_packets": 50000
+    },
+    "derived_cache_entries": 1
+  },
+  "in_flight_state": {
+    "in_flight_results_count": 1,
+    "parse_events_count": 0,
+    "in_flight_keys_sample": [
+      [
+        "C:\\Users\\Srushti Patil\\OneDrive\\Desktop\\New folder\\NetWatch\\backend\\captures\\sample.pcapng",
+        1794908612166080700,
+        35556340,
+        null
+      ]
+    ],
+    "parse_event_keys_sample": []
+  },
+  "summary": {
+    "total_cold_ms": 5717.21,
+    "avg_warm_ms": 16.494285714285713,
+    "total_cold_size_bytes": 35856,
+    "total_warm_size_bytes": 35856
+  }
+}
