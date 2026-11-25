@@ -59,14 +59,12 @@ from analyzers.traffic_analyzer import (
 )
 from analyzers.shared_capture import (
     get_parsed_capture,
+    get_cache_stats,
     clear_caches as clear_shared_cache,
     _PARSED_CAPTURE_CACHE,
     _PARSED_CAPTURE_LOCK,
-    _PARSE_EVENTS,
-    _PARSE_EVENTS_LOCK,
-    _IN_FLIGHT_RESULTS,
-    _IN_FLIGHT_RESULTS_LOCK,
-    _CACHED_PACKET_COUNT,
+    _FLIGHT_STATES,
+    _FLIGHT_STATES_LOCK,
     MAX_CACHE_ENTRIES,
     MAX_CACHE_PACKETS,
     _get_file_identity,
@@ -94,6 +92,40 @@ def _fail(name: str, detail: str = ""):
     FAIL += 1
     _results.append(("FAIL", name, detail))
     print(f"  FAIL  {name}" + (f" — {detail}" if detail else ""))
+
+
+# ---------------------------------------------------------------------------
+# Flight state inspection helpers (for new _FLIGHT_STATES API)
+# ---------------------------------------------------------------------------
+
+def _count_active_flights() -> int:
+    """Count flight states where parse is still in progress (not completed)."""
+    with _FLIGHT_STATES_LOCK:
+        return sum(1 for s in _FLIGHT_STATES.values() if not s.completed)
+
+
+def _count_completed_flights() -> int:
+    """Count flight states where parse completed and result is available."""
+    with _FLIGHT_STATES_LOCK:
+        return sum(1 for s in _FLIGHT_STATES.values() if s.completed and s.result is not None)
+
+
+def _count_failed_flights() -> int:
+    """Count flight states where parse completed with failure (result is None)."""
+    with _FLIGHT_STATES_LOCK:
+        return sum(1 for s in _FLIGHT_STATES.values() if s.completed and s.result is None)
+
+
+def _count_total_flight_states() -> int:
+    """Count all flight states."""
+    with _FLIGHT_STATES_LOCK:
+        return len(_FLIGHT_STATES)
+
+
+def _clear_flight_states():
+    """Clear all flight states for test isolation."""
+    with _FLIGHT_STATES_LOCK:
+        _FLIGHT_STATES.clear()
 
 
 def _build_pcapng_with_packets(n_packets: int) -> bytes:
@@ -213,9 +245,27 @@ def _write_temp_pcapng(data: bytes, suffix: str = "") -> str:
         return f.name
 
 
+def _assert_cache_count_invariant(context: str) -> bool:
+    """Verify _CACHED_PACKET_COUNT == sum(capture.total_packets for capture in _PARSED_CAPTURE_CACHE.values())."""
+    import analyzers.shared_capture as sc_module
+    with _PARSED_CAPTURE_LOCK:
+        expected = sum(c.total_packets for c in _PARSED_CAPTURE_CACHE.values())
+        actual = sc_module._CACHED_PACKET_COUNT
+        stats_total = get_cache_stats()["total_packets"]
+        if actual == expected and stats_total == expected:
+            _ok(f"Invariant [{context}]", f"_CACHED_PACKET_COUNT={actual} == sum={expected}")
+            return True
+        _fail(
+            f"Invariant [{context}]",
+            f"_CACHED_PACKET_COUNT={actual}, stats={stats_total}, expected sum={expected}",
+        )
+        return False
+
+
 def _clear_caches():
     """Clear all internal caches for test isolation."""
     clear_shared_cache()
+    _clear_flight_states()
     # Also clear traffic analyzer derived cache
     import analyzers.traffic_analyzer as ta_module
     ta_module._ANALYSIS_CACHE.clear()
@@ -623,12 +673,14 @@ def test_failed_scan_releases_resources():
             return
         _ok("Failed scan release: all concurrent requests returned None for corrupt file")
 
-        # Check that no parse events are leaked
-        with _PARSE_EVENTS_LOCK:
-            if len(_PARSE_EVENTS) == 0:
+        # Check that no parse events are leaked (states should be cleaned up for failed parses)
+        with _FLIGHT_STATES_LOCK:
+            # Count states that are not completed (active parses)
+            active_states = sum(1 for s in _FLIGHT_STATES.values() if not s.completed)
+            if active_states == 0:
                 _ok("Failed scan release: no parse events leaked")
             else:
-                _fail("Failed scan release: parse events leaked", f"count={len(_PARSE_EVENTS)}")
+                _fail("Failed scan release: parse events leaked", f"count={active_states}")
 
         # Check shared cache is empty
         with _PARSED_CAPTURE_LOCK:
@@ -1530,14 +1582,12 @@ def test_oversized_capture_single_flight():
             else:
                 _fail("Oversized single-flight: shared cache not empty", f"count={len(_PARSED_CAPTURE_CACHE)}")
 
-        # In-flight results are retained until next parse for same key (not leaked)
-        # This is by design - they allow subsequent callers to get result without re-parsing
-        from analyzers.shared_capture import _IN_FLIGHT_RESULTS
-        with _IN_FLIGHT_RESULTS_LOCK:
-            if len(_IN_FLIGHT_RESULTS) == 1:
-                _ok("Oversized single-flight: in-flight result retained for reuse (cleaned on next parse)")
-            else:
-                _fail("Oversized single-flight: unexpected in-flight result count", f"count={len(_IN_FLIGHT_RESULTS)}")
+        # In-flight results: with new design, completed flights with waiters are retained
+        # until all waiters consume. After all 5 complete (1 parser + 4 waiters), cleaned up.
+        if _count_completed_flights() == 0:
+            _ok("Oversized single-flight: in-flight results cleaned up after all waiters consume")
+        else:
+            _fail("Oversized single-flight: unexpected completed flight count", f"count={_count_completed_flights()}")
 
     finally:
         sc_module.MAX_CACHE_PACKETS = original_budget
@@ -1599,21 +1649,18 @@ def test_failed_parse_single_flight():
             else:
                 _fail("Failed parse single-flight: shared cache not empty", f"count={len(_PARSED_CAPTURE_CACHE)}")
 
-        # Parse events should be cleaned up
-        from analyzers.shared_capture import _PARSE_EVENTS
-        with _PARSE_EVENTS_LOCK:
-            if len(_PARSE_EVENTS) == 0:
-                _ok("Failed parse single-flight: parse events cleaned up")
-            else:
-                _fail("Failed parse single-flight: parse events leaked", f"count={len(_PARSE_EVENTS)}")
+        # Parse events should be cleaned up (no active flights)
+        if _count_active_flights() == 0:
+            _ok("Failed parse single-flight: parse events cleaned up")
+        else:
+            _fail("Failed parse single-flight: parse events leaked", f"count={_count_active_flights()}")
 
-        # In-flight results are retained until next parse for same key (not leaked)
-        from analyzers.shared_capture import _IN_FLIGHT_RESULTS
-        with _IN_FLIGHT_RESULTS_LOCK:
-            if len(_IN_FLIGHT_RESULTS) == 1:
-                _ok("Failed parse single-flight: in-flight result retained for reuse (cleaned on next parse)")
-            else:
-                _fail("Failed parse single-flight: unexpected in-flight result count", f"count={len(_IN_FLIGHT_RESULTS)}")
+        # Failed flight results: with new design, completed flights with waiters are retained
+        # until all waiters consume. After all 5 complete, cleaned up.
+        if _count_failed_flights() == 0:
+            _ok("Failed parse single-flight: failed flight results cleaned up after all waiters consume")
+        else:
+            _fail("Failed parse single-flight: unexpected failed flight count", f"count={_count_failed_flights()}")
 
     finally:
         try:
@@ -1644,12 +1691,10 @@ def test_retry_after_failed_parse():
             return
         _ok("Retry after failure: corrupt file correctly returns None")
 
-        # Parse events should be clean
-        from analyzers.shared_capture import _PARSE_EVENTS
-        with _PARSE_EVENTS_LOCK:
-            if len(_PARSE_EVENTS) != 0:
-                _fail("Retry after failure: parse events not cleaned up after corrupt file", f"count={len(_PARSE_EVENTS)}")
-                return
+        # Parse events should be clean (no active flights)
+        if _count_active_flights() != 0:
+            _fail("Retry after failure: parse events not cleaned up after corrupt file", f"count={_count_active_flights()}")
+            return
 
         # Now try with a valid file - should work normally
         valid_data = _build_pcapng_with_tcp_packets(10)
@@ -1667,15 +1712,12 @@ def test_retry_after_failed_parse():
                 pass
 
         # In-flight results are keyed by cache key, so corrupt and valid files
-        # have separate entries. This is correct behavior.
-        from analyzers.shared_capture import _IN_FLIGHT_RESULTS
-        with _IN_FLIGHT_RESULTS_LOCK:
-            # Should have 1 entry for the corrupt file (retained until re-parse)
-            # and 1 entry for the valid file (retained until re-parse)
-            if len(_IN_FLIGHT_RESULTS) == 2:
-                _ok("Retry after failure: in-flight results managed correctly (separate per file)")
-            else:
-                _fail("Retry after failure: unexpected in-flight result count", f"count={len(_IN_FLIGHT_RESULTS)}")
+        # have separate entries. With new design, both should be cleaned up after
+        # their respective waiters consume (single caller = no waiters = immediate cleanup).
+        if _count_total_flight_states() == 0:
+            _ok("Retry after failure: in-flight results managed correctly (separate per file, cleaned up)")
+        else:
+            _fail("Retry after failure: unexpected flight state count", f"count={_count_total_flight_states()}")
 
     finally:
         try:
@@ -1686,54 +1728,50 @@ def test_retry_after_failed_parse():
 
 
 # ---------------------------------------------------------------------------
-# Test 25: In-flight cleanup
+# Test 25: In-flight lifecycle
 # ---------------------------------------------------------------------------
 
-def test_in_flight_cleanup():
-    """Test that in-flight results are properly cleaned up when next parse starts."""
-    print("\n── Test 25: In-flight cleanup ──")
+def test_in_flight_lifecycle():
+    """Test that flight states are properly managed:
+    - Single request (no waiters): cleaned up immediately after parse
+    - Concurrent requests (with waiters): retained until all waiters consume
+    - Different capture fingerprints: independent lifecycle
+    - Failed parses: same lifecycle as successful parses
+    - Oversized captures: same lifecycle
+    """
+    print("\n── Test 25: In-flight lifecycle ──")
 
-    from analyzers.shared_capture import _IN_FLIGHT_RESULTS, _PARSE_EVENTS
-
-    # Test 1: Successful parse - in-flight result retained until next parse
+    # Test 1: Single request (no waiters) - should clean up immediately
     _clear_caches()
     pcap_data = _build_pcapng_with_tcp_packets(10)
     path1 = _write_temp_pcapng(pcap_data, "_test25a")
     try:
         result = analyze_packets(path1, limit=5)
         if result is None:
-            _fail("In-flight cleanup: successful parse failed")
+            _fail("In-flight lifecycle: successful parse failed")
             return
 
-        with _IN_FLIGHT_RESULTS_LOCK:
-            if len(_IN_FLIGHT_RESULTS) == 1:
-                _ok("In-flight cleanup: in-flight result retained after successful parse")
-            else:
-                _fail("In-flight cleanup: unexpected in-flight result count after success", f"count={len(_IN_FLIGHT_RESULTS)}")
+        # With no concurrent waiters, flight state should be cleaned up immediately
+        if _count_total_flight_states() == 0:
+            _ok("In-flight lifecycle: single request cleaned up immediately")
+        else:
+            _fail("In-flight lifecycle: unexpected flight state count after single request", f"count={_count_total_flight_states()}")
 
-        with _PARSE_EVENTS_LOCK:
-            if len(_PARSE_EVENTS) == 0:
-                _ok("In-flight cleanup: parse events cleaned up after successful parse")
-            else:
-                _fail("In-flight cleanup: parse events leaked after success", f"count={len(_PARSE_EVENTS)}")
-
-        # Now do a second parse for the SAME file - should clean up the old in-flight result
+        # Second request for same file - new parse, also cleaned up
         result2 = analyze_packets(path1, limit=5)
         if result2 is None:
-            _fail("In-flight cleanup: second parse failed")
+            _fail("In-flight lifecycle: second parse failed")
             return
 
-        with _IN_FLIGHT_RESULTS_LOCK:
-            # Should still have 1 entry (the new in-flight result from second parse)
-            if len(_IN_FLIGHT_RESULTS) == 1:
-                _ok("In-flight cleanup: old in-flight result replaced by new one on re-parse")
-            else:
-                _fail("In-flight cleanup: unexpected in-flight result count after re-parse", f"count={len(_IN_FLIGHT_RESULTS)}")
+        if _count_total_flight_states() == 0:
+            _ok("In-flight lifecycle: re-parse also cleaned up immediately")
+        else:
+            _fail("In-flight lifecycle: unexpected count after re-parse", f"count={_count_total_flight_states()}")
     finally:
         os.unlink(path1)
         _clear_caches()
 
-    # Test 2: Oversized capture - in-flight result retained until next parse
+    # Test 2: Concurrent requests (with waiters) - retained until all consume
     import analyzers.shared_capture as sc_module
     original_budget = sc_module.MAX_CACHE_PACKETS
     sc_module.MAX_CACHE_PACKETS = 50
@@ -1742,76 +1780,83 @@ def test_in_flight_cleanup():
     data = _build_pcapng_with_tcp_packets(100)
     path2 = _write_temp_pcapng(data, "_test25b")
     try:
-        result = analyze_packets(path2, limit=100)
-        if result is None or len(result) != 100:
-            _fail("In-flight cleanup: oversized parse failed")
+        # Use barrier to ensure concurrent start
+        barrier = threading.Barrier(3)
+        results = [None] * 3
+        exceptions = [None] * 3
+
+        def worker(idx):
+            try:
+                barrier.wait()
+                results[idx] = analyze_packets(path2, limit=100)
+            except Exception as e:
+                exceptions[idx] = e
+
+        threads = [threading.Thread(target=worker, args=(i,)) for i in range(3)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=15)
+
+        for i, exc in enumerate(exceptions):
+            if exc:
+                _fail("In-flight lifecycle concurrent: thread exception", f"thread {i}: {exc}")
+                return
+
+        if any(r is None or len(r) != 100 for r in results):
+            _fail("In-flight lifecycle concurrent: some results failed", f"results: {[len(r) if r else 0 for r in results]}")
             return
 
-        with _IN_FLIGHT_RESULTS_LOCK:
-            if len(_IN_FLIGHT_RESULTS) == 1:
-                _ok("In-flight cleanup: in-flight result retained after oversized parse")
-            else:
-                _fail("In-flight cleanup: unexpected in-flight result count after oversized", f"count={len(_IN_FLIGHT_RESULTS)}")
+        # With 3 concurrent requests (1 parser + 2 waiters), flight state should be
+        # retained until all waiters consume, then cleaned up.
+        if _count_total_flight_states() == 0:
+            _ok("In-flight lifecycle: concurrent oversized requests cleaned up after all waiters consume")
+        else:
+            _fail("In-flight lifecycle concurrent: unexpected flight state count", f"count={_count_total_flight_states()}")
 
-        with _PARSE_EVENTS_LOCK:
-            if len(_PARSE_EVENTS) == 0:
-                _ok("In-flight cleanup: parse events cleaned up after oversized parse")
-            else:
-                _fail("In-flight cleanup: parse events leaked after oversized", f"count={len(_PARSE_EVENTS)}")
-
-        # Re-parse should clean up old in-flight result
+        # Re-parse should also clean up
         result2 = analyze_packets(path2, limit=100)
         if result2 is None or len(result2) != 100:
-            _fail("In-flight cleanup: second oversized parse failed")
+            _fail("In-flight lifecycle concurrent: second oversized parse failed")
             return
 
-        with _IN_FLIGHT_RESULTS_LOCK:
-            if len(_IN_FLIGHT_RESULTS) == 1:
-                _ok("In-flight cleanup: old in-flight result replaced on oversized re-parse")
-            else:
-                _fail("In-flight cleanup: unexpected count after oversized re-parse", f"count={len(_IN_FLIGHT_RESULTS)}")
+        if _count_total_flight_states() == 0:
+            _ok("In-flight lifecycle: concurrent re-parse cleaned up")
+        else:
+            _fail("In-flight lifecycle concurrent: unexpected count after re-parse", f"count={_count_total_flight_states()}")
     finally:
         sc_module.MAX_CACHE_PACKETS = original_budget
         os.unlink(path2)
         _clear_caches()
 
-    # Test 3: Failed parse - in-flight result retained until next parse
+    # Test 3: Failed parse - same lifecycle
     _clear_caches()
     path3 = _write_temp_pcapng(b"NOT A PCAPNG FILE\x00\x01\x02", "_test25c")
     try:
         result = analyze_packets(path3, limit=10)
         if result is not None:
-            _fail("In-flight cleanup: failed parse should return None")
+            _fail("In-flight lifecycle: failed parse should return None")
             return
 
-        with _IN_FLIGHT_RESULTS_LOCK:
-            if len(_IN_FLIGHT_RESULTS) == 1:
-                _ok("In-flight cleanup: in-flight result retained after failed parse")
-            else:
-                _fail("In-flight cleanup: unexpected in-flight result count after failed parse", f"count={len(_IN_FLIGHT_RESULTS)}")
+        # Single failed parse - cleaned up immediately
+        if _count_total_flight_states() == 0:
+            _ok("In-flight lifecycle: failed parse cleaned up immediately")
+        else:
+            _fail("In-flight lifecycle: unexpected flight state count after failed parse", f"count={_count_total_flight_states()}")
 
-        with _PARSE_EVENTS_LOCK:
-            if len(_PARSE_EVENTS) == 0:
-                _ok("In-flight cleanup: parse events cleaned up after failed parse")
-            else:
-                _fail("In-flight cleanup: parse events leaked after failed parse", f"count={len(_PARSE_EVENTS)}")
-
-        # Re-parse with valid file - different key, so separate in-flight entry
+        # Different file = different cache key = independent lifecycle
         valid_data = _build_pcapng_with_tcp_packets(10)
         valid_path = _write_temp_pcapng(valid_data, "_test25d")
         try:
             result2 = analyze_packets(valid_path, limit=5)
             if result2 is None or len(result2) != 5:
-                _fail("In-flight cleanup: valid re-parse failed")
+                _fail("In-flight lifecycle: valid re-parse failed")
                 return
 
-            with _IN_FLIGHT_RESULTS_LOCK:
-                # Different file = different cache key = separate in-flight entry
-                # This is correct behavior - in-flight results are per cache key
-                if len(_IN_FLIGHT_RESULTS) == 2:
-                    _ok("In-flight cleanup: separate in-flight results per cache key (correct)")
-                else:
-                    _fail("In-flight cleanup: unexpected count after valid re-parse", f"count={len(_IN_FLIGHT_RESULTS)}")
+            if _count_total_flight_states() == 0:
+                _ok("In-flight lifecycle: separate cache key = independent lifecycle (cleaned up)")
+            else:
+                _fail("In-flight lifecycle: unexpected count after valid re-parse", f"count={_count_total_flight_states()}")
         finally:
             os.unlink(valid_path)
     finally:
@@ -2010,53 +2055,334 @@ def test_existing_cache_budgets_still_work():
             except:
                 pass
         _clear_caches()
-    """Run all packet cache reliability tests."""
-    print("=" * 60)
-    print("NetWatch — Milestone 4D.2.1/4D.2.2/4D.3 Packet Cache Reliability Tests")
-    print("=" * 60)
-    print(f"MAX_CACHE_ENTRIES = {MAX_CACHE_ENTRIES}")
-    print(f"MAX_CACHE_PACKETS = {MAX_CACHE_PACKETS}")
 
-    test_single_flight_same_capture()
-    test_independent_scans_different_captures()
-    test_cache_hits_across_limits()
-    test_lru_eviction()
-    test_modified_capture_invalidates_cache()
-    test_modification_during_scan_prevents_caching()
-    test_failed_scan_releases_resources()
-    test_returned_packets_independent()
-    test_cache_key_includes_identity()
-    test_replacement_detection_posix()
-    test_windows_identity_behavior()
-    test_packet_budget_eviction()
-    test_dual_limit_enforcement()
-    test_oversized_capture_not_cached()
-    test_packet_accounting_replacement()
-    test_concurrent_accounting()
-    test_shared_parse_single_capture()
-    test_traffic_uses_shared_capture()
-    test_derived_result_cache()
-    test_concurrent_endpoints_single_parse()
-    test_derived_cache_mutation_protection()
-    test_oversized_capture_single_flight()
-    test_failed_parse_single_flight()
-    test_retry_after_failed_parse()
-    test_in_flight_cleanup()
-    test_single_flight_normal_cache_still_works()
-    test_independent_captures_still_parse_independently()
-    test_existing_cache_budgets_still_work()
 
-    print("\n" + "=" * 60)
-    total = PASS + FAIL
-    print(f"Results: {PASS}/{total} passed, {FAIL} failed")
-    print("=" * 60)
-    return FAIL == 0
+# ---------------------------------------------------------------------------
+# Test 29: Packet-count invariant across all lifecycle operations
+# ---------------------------------------------------------------------------
+
+def test_packet_count_invariant_lifecycle():
+    """Verify _CACHED_PACKET_COUNT == sum(capture.total_packets) after every operation."""
+    print("\n── Test 29: Packet-count invariant across lifecycle ──")
+
+    import analyzers.shared_capture as sc_module
+    original_entries = sc_module.MAX_CACHE_ENTRIES
+    original_packets = sc_module.MAX_CACHE_PACKETS
+    sc_module.MAX_CACHE_ENTRIES = 2
+    sc_module.MAX_CACHE_PACKETS = 50
+
+    _clear_caches()
+    paths = []
+    try:
+        _assert_cache_count_invariant("after clear_caches")
+
+        # 1. Initial insertion (15 packets)
+        p0 = _write_temp_pcapng(_build_pcapng_with_tcp_packets(15), "_test29_0")
+        paths.append(p0)
+        assert analyze_packets(p0, limit=10) is not None
+        _assert_cache_count_invariant("after initial insertion (15)")
+
+        # 2. Replacement of same cache key via _cache_parsed_capture
+        cap0 = get_parsed_capture(p0)
+        sc_module._cache_parsed_capture(p0, cap0)
+        _assert_cache_count_invariant("after same-key replacement")
+
+        # 3. Second insertion (20 packets -> total 35)
+        p1 = _write_temp_pcapng(_build_pcapng_with_tcp_packets(20), "_test29_1")
+        paths.append(p1)
+        assert analyze_packets(p1, limit=10) is not None
+        _assert_cache_count_invariant("after second insertion (15+20=35)")
+
+        # 4. Entry-limit LRU eviction (inserting 10 packets -> evicts p0(15), leaves 20+10=30)
+        p2 = _write_temp_pcapng(_build_pcapng_with_tcp_packets(10), "_test29_2")
+        paths.append(p2)
+        assert analyze_packets(p2, limit=10) is not None
+        _assert_cache_count_invariant("after entry-limit LRU eviction (20+10=30)")
+
+        # 5. Oversized capture (60 > 50) does not disturb persistent count
+        p_big = _write_temp_pcapng(_build_pcapng_with_tcp_packets(60), "_test29_big")
+        paths.append(p_big)
+        res_big = analyze_packets(p_big, limit=60)
+        if res_big is not None and len(res_big) == 60:
+            _ok("Invariant lifecycle: oversized capture returned 60 packets")
+        else:
+            _fail("Invariant lifecycle: oversized capture failed")
+        _assert_cache_count_invariant("after oversized capture")
+
+        # 6. Failed parse does not disturb persistent count
+        p_bad = _write_temp_pcapng(b"CORRUPT_PCAPNG_DATA", "_test29_bad")
+        paths.append(p_bad)
+        assert analyze_packets(p_bad, limit=5) is None
+        _assert_cache_count_invariant("after failed parse")
+
+        # 7. Clear caches resets to 0
+        _clear_caches()
+        _assert_cache_count_invariant("after final clear_caches")
+    finally:
+        sc_module.MAX_CACHE_ENTRIES = original_entries
+        sc_module.MAX_CACHE_PACKETS = original_packets
+        for p in paths:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+        _clear_caches()
+
+
+# ---------------------------------------------------------------------------
+# Test 30: Packet-count budget genuinely triggers LRU eviction
+# ---------------------------------------------------------------------------
+
+def test_packet_budget_genuinely_triggers_eviction():
+    """Verify packet-count budget evicts LRU entry so the incoming entry IS cached."""
+    print("\n── Test 30: Packet budget genuinely triggers eviction ──")
+
+    import analyzers.shared_capture as sc_module
+    original_entries = sc_module.MAX_CACHE_ENTRIES
+    original_packets = sc_module.MAX_CACHE_PACKETS
+    sc_module.MAX_CACHE_ENTRIES = 10
+    sc_module.MAX_CACHE_PACKETS = 50
+
+    _clear_caches()
+    paths = []
+    try:
+        for i in range(3):
+            p = _write_temp_pcapng(_build_pcapng_with_tcp_packets(20), f"_test30_{i}")
+            paths.append(p)
+            assert analyze_packets(p, limit=20) is not None
+
+        with _PARSED_CAPTURE_LOCK:
+            keys = list(_PARSED_CAPTURE_CACHE.keys())
+            cached_paths = [k[0] for k in keys]
+            if len(keys) == 2 and paths[0] not in cached_paths and paths[1] in cached_paths and paths[2] in cached_paths:
+                _ok("Packet budget eviction: LRU entry 0 evicted, entries 1 and 2 cached")
+            else:
+                _fail("Packet budget eviction: wrong entries in cache", f"cached_paths={cached_paths}")
+
+        _assert_cache_count_invariant("after genuine packet-budget eviction (40)")
+    finally:
+        sc_module.MAX_CACHE_ENTRIES = original_entries
+        sc_module.MAX_CACHE_PACKETS = original_packets
+        for p in paths:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+        _clear_caches()
+
+
+# ---------------------------------------------------------------------------
+# Test 31: Deterministic parse-count verification for concurrent single-flight
+# ---------------------------------------------------------------------------
+
+def test_single_parse_call_counts_concurrent():
+    """Deterministically verify _parse_capture runs once for concurrent normal, oversized, and failed requests."""
+    print("\n── Test 31: Deterministic single-parse counts ──")
+
+    import analyzers.shared_capture as sc_module
+    original_parse = sc_module._parse_capture
+    original_budget = sc_module.MAX_CACHE_PACKETS
+    sc_module.MAX_CACHE_PACKETS = 50
+
+    paths = []
+    try:
+        scenarios = [
+            ("normal", _build_pcapng_with_tcp_packets(20), 20),
+            ("oversized", _build_pcapng_with_tcp_packets(80), 80),
+            ("failed", b"INVALID_PCAPNG_BYTES", None),
+        ]
+
+        for label, payload, expected_len in scenarios:
+            _clear_caches()
+            p = _write_temp_pcapng(payload, f"_test31_{label}")
+            paths.append(p)
+
+            parse_calls = 0
+            count_lock = threading.Lock()
+            parse_entered = threading.Event()
+            release_parse = threading.Event()
+
+            def wrapped_parse(pcap_path, cache_key, fp_before):
+                nonlocal parse_calls
+                with count_lock:
+                    parse_calls += 1
+                parse_entered.set()
+                release_parse.wait(timeout=5)
+                return original_parse(pcap_path, cache_key, fp_before)
+
+            sc_module._parse_capture = wrapped_parse
+            try:
+                results = [None] * 5
+
+                def parser_worker():
+                    results[0] = analyze_packets(p, limit=100)
+
+                def waiter_worker(idx):
+                    parse_entered.wait(timeout=5)
+                    results[idx] = analyze_packets(p, limit=100)
+
+                t0 = threading.Thread(target=parser_worker)
+                t0.start()
+                parse_entered.wait(timeout=5)
+
+                waiters = [threading.Thread(target=waiter_worker, args=(i,)) for i in range(1, 5)]
+                for w in waiters:
+                    w.start()
+
+                # Wait until all 4 waiters are registered on FlightState
+                deadline = time.monotonic() + 5.0
+                while time.monotonic() < deadline:
+                    with _FLIGHT_STATES_LOCK:
+                        total_waiters = sum(s.waiters for s in _FLIGHT_STATES.values())
+                    if total_waiters == 4:
+                        break
+                    time.sleep(0.005)
+
+                release_parse.set()
+                t0.join(timeout=10)
+                for w in waiters:
+                    w.join(timeout=10)
+
+                if parse_calls == 1:
+                    _ok(f"Single-parse [{label}]: _parse_capture called exactly once for 5 concurrent threads")
+                else:
+                    _fail(f"Single-parse [{label}]: expected 1 parse call, got {parse_calls}")
+
+                if expected_len is None:
+                    if all(r is None for r in results):
+                        _ok(f"Single-parse [{label}]: all 5 threads received None")
+                    else:
+                        _fail(f"Single-parse [{label}]: expected all None")
+                else:
+                    if all(r is not None and len(r) == expected_len for r in results):
+                        _ok(f"Single-parse [{label}]: all 5 threads received {expected_len} packets")
+                    else:
+                        _fail(f"Single-parse [{label}]: wrong results {[len(r) if r else None for r in results]}")
+
+                if _count_total_flight_states() == 0:
+                    _ok(f"Single-parse [{label}]: _FLIGHT_STATES cleaned up (0 entries)")
+                else:
+                    _fail(f"Single-parse [{label}]: _FLIGHT_STATES leaked ({_count_total_flight_states()})")
+
+                _assert_cache_count_invariant(f"after concurrent {label}")
+            finally:
+                sc_module._parse_capture = original_parse
+    finally:
+        sc_module.MAX_CACHE_PACKETS = original_budget
+        for p in paths:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+        _clear_caches()
+
+
+# ---------------------------------------------------------------------------
+# Test 32: Repeated distinct captures do not accumulate in-flight state
+# ---------------------------------------------------------------------------
+
+def test_repeated_distinct_captures_no_inflight_accumulation():
+    """Verify repeated distinct captures (normal, oversized, failed) leave 0 flight states."""
+    print("\n── Test 32: Repeated distinct captures have zero in-flight accumulation ──")
+
+    import analyzers.shared_capture as sc_module
+    original_budget = sc_module.MAX_CACHE_PACKETS
+    sc_module.MAX_CACHE_PACKETS = 50
+
+    _clear_caches()
+    paths = []
+    try:
+        for i in range(15):
+            if i % 3 == 0:
+                payload = _build_pcapng_with_tcp_packets(10)
+            elif i % 3 == 1:
+                payload = _build_pcapng_with_tcp_packets(75)  # oversized
+            else:
+                payload = b"CORRUPT_" + str(i).encode()
+            p = _write_temp_pcapng(payload, f"_test32_{i}")
+            paths.append(p)
+            analyze_packets(p, limit=100)
+
+        if _count_total_flight_states() == 0:
+            _ok("No in-flight accumulation: _FLIGHT_STATES == 0 after 15 distinct captures")
+        else:
+            _fail("No in-flight accumulation: entries leaked", f"count={_count_total_flight_states()}")
+
+        _assert_cache_count_invariant("after 15 distinct captures")
+    finally:
+        sc_module.MAX_CACHE_PACKETS = original_budget
+        for p in paths:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+        _clear_caches()
+
+
+# ---------------------------------------------------------------------------
+# Test 33: Concurrent eviction preserves packet-count invariant
+# ---------------------------------------------------------------------------
+
+def test_concurrent_eviction_preserves_invariant():
+    """Verify _CACHED_PACKET_COUNT invariant under concurrent multi-file evictions."""
+    print("\n── Test 33: Concurrent eviction preserves invariant ──")
+
+    import analyzers.shared_capture as sc_module
+    original_entries = sc_module.MAX_CACHE_ENTRIES
+    original_packets = sc_module.MAX_CACHE_PACKETS
+    sc_module.MAX_CACHE_ENTRIES = 4
+    sc_module.MAX_CACHE_PACKETS = 60
+
+    _clear_caches()
+    paths = []
+    try:
+        for i in range(10):
+            p = _write_temp_pcapng(_build_pcapng_with_tcp_packets(15 + (i % 3) * 5), f"_test33_{i}")
+            paths.append(p)
+
+        barrier = threading.Barrier(len(paths))
+        errors = []
+
+        def worker(path):
+            try:
+                barrier.wait(timeout=5)
+                res = analyze_packets(path, limit=50)
+                if res is None:
+                    errors.append(f"None for {path}")
+            except Exception as exc:
+                errors.append(str(exc))
+
+        threads = [threading.Thread(target=worker, args=(p,)) for p in paths]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=15)
+
+        if not errors:
+            _ok("Concurrent eviction: all 10 concurrent threads succeeded")
+        else:
+            _fail("Concurrent eviction: thread errors", str(errors))
+
+        _assert_cache_count_invariant("after concurrent eviction")
+        if _count_total_flight_states() == 0:
+            _ok("Concurrent eviction: _FLIGHT_STATES == 0")
+        else:
+            _fail("Concurrent eviction: leaked flight states", f"count={_count_total_flight_states()}")
+    finally:
+        sc_module.MAX_CACHE_ENTRIES = original_entries
+        sc_module.MAX_CACHE_PACKETS = original_packets
+        for p in paths:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+        _clear_caches()
 
 
 def run_all_tests():
     """Run all packet cache reliability tests."""
     print("=" * 60)
-    print("NetWatch — Milestone 4D.2.1/4D.2.2/4D.3/4D.3.1 Packet Cache Reliability Tests")
+    print("NetWatch — Milestone 4D.2.1/4D.2.2/4D.3/4D.4.1 Packet Cache Reliability Tests")
     print("=" * 60)
     print(f"MAX_CACHE_ENTRIES = {MAX_CACHE_ENTRIES}")
     print(f"MAX_CACHE_PACKETS = {MAX_CACHE_PACKETS}")
@@ -2085,10 +2411,15 @@ def run_all_tests():
     test_oversized_capture_single_flight()
     test_failed_parse_single_flight()
     test_retry_after_failed_parse()
-    test_in_flight_cleanup()
+    test_in_flight_lifecycle()
     test_single_flight_normal_cache_still_works()
     test_independent_captures_still_parse_independently()
     test_existing_cache_budgets_still_work()
+    test_packet_count_invariant_lifecycle()
+    test_packet_budget_genuinely_triggers_eviction()
+    test_single_parse_call_counts_concurrent()
+    test_repeated_distinct_captures_no_inflight_accumulation()
+    test_concurrent_eviction_preserves_invariant()
 
     print("\n" + "=" * 60)
     total = PASS + FAIL

@@ -116,18 +116,28 @@ _PARSED_CAPTURE_LOCK = threading.RLock()
 # Running total of packets currently cached. Updated under _PARSED_CAPTURE_LOCK.
 _CACHED_PACKET_COUNT = 0
 
-# Per-capture synchronization: maps cache_key -> threading.Event.
-# An Event is set when the parse for that key completes (success or failure).
-# Waiting threads block on the event and then re-check the cache.
-_PARSE_EVENTS = {}
-_PARSE_EVENTS_LOCK = threading.Lock()
+# Per-capture synchronization state.
+# Key: cache_key -> FlightState
+# FlightState holds the parse event, result, waiter count, and completion flag.
+# This replaces the separate _PARSE_EVENTS and _IN_FLIGHT_RESULTS dicts.
+_FLIGHT_STATES = {}
+_FLIGHT_STATES_LOCK = threading.Lock()
 
-# In-flight results for single-flight handoff.
-# Key: cache_key -> ParsedCapture or None (for failed parse)
-# This allows waiting threads to get the result even if it's not cached
-# (e.g., oversized captures or failed parses).
-_IN_FLIGHT_RESULTS = {}
-_IN_FLIGHT_RESULTS_LOCK = threading.Lock()
+
+@dataclass(slots=True)
+class FlightState:
+    """
+    State for a single in-flight or recently completed parse.
+    
+    waiters: number of threads currently waiting on this parse (excludes the parser).
+    completed: whether the parse has finished (success or failure).
+    result: the ParsedCapture (or None for failure/oversized).
+    event: threading.Event signaled when parse completes.
+    """
+    event: threading.Event
+    result: Optional[ParsedCapture] = None
+    waiters: int = 0
+    completed: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -199,15 +209,16 @@ def _get_cached_capture(pcap_path: str) -> Optional[ParsedCapture]:
         return capture
 
 
-def _evict_lru_entries() -> None:
+def _evict_lru_entries(incoming_packets: int = 0) -> None:
     """
     Evict least-recently-used entries until both entry and packet limits
-    are satisfied. Must be called under _PARSED_CAPTURE_LOCK.
+    have room for an entry with `incoming_packets`.
+    Must be called under _PARSED_CAPTURE_LOCK.
     """
     global _CACHED_PACKET_COUNT
     while (_PARSED_CAPTURE_CACHE and
            (len(_PARSED_CAPTURE_CACHE) >= MAX_CACHE_ENTRIES or
-            _CACHED_PACKET_COUNT >= MAX_CACHE_PACKETS)):
+            _CACHED_PACKET_COUNT + incoming_packets > MAX_CACHE_PACKETS)):
         _, evicted_capture = _PARSED_CAPTURE_CACHE.popitem(last=False)
         _CACHED_PACKET_COUNT -= evicted_capture.total_packets
 
@@ -230,17 +241,13 @@ def _cache_parsed_capture(pcap_path: str, capture: ParsedCapture) -> None:
         return
 
     with _PARSED_CAPTURE_LOCK:
-        # If key already exists, update and move to end (adjust packet count)
+        # If key already exists, remove old entry first so budget check is exact
         if cache_key in _PARSED_CAPTURE_CACHE:
-            old_capture = _PARSED_CAPTURE_CACHE[cache_key]
+            old_capture = _PARSED_CAPTURE_CACHE.pop(cache_key)
             _CACHED_PACKET_COUNT -= old_capture.total_packets
-            _PARSED_CAPTURE_CACHE[cache_key] = capture
-            _PARSED_CAPTURE_CACHE.move_to_end(cache_key)
-            _CACHED_PACKET_COUNT += packet_count
-            return
 
-        # Evict oldest entries until both limits satisfied
-        _evict_lru_entries()
+        # Evict oldest entries until both limits satisfied for the incoming capture
+        _evict_lru_entries(packet_count)
 
         # After eviction, check if we still have room
         if (len(_PARSED_CAPTURE_CACHE) < MAX_CACHE_ENTRIES and
@@ -250,53 +257,56 @@ def _cache_parsed_capture(pcap_path: str, capture: ParsedCapture) -> None:
         # If still no room, don't cache this entry
 
 
-def _get_or_create_parse_event(cache_key: Tuple) -> Tuple[threading.Event, bool]:
-    """Get or create a parse event for the given cache key.
+def _get_or_create_parse_event(cache_key: Tuple) -> Tuple[FlightState, bool]:
+    """Get or create a flight state for the given cache key.
 
-    Returns the event that callers should wait on. The caller that creates
-    the event (i.e., the one that will perform the parse) is responsible for
-    setting it when done.
-
-    Also cleans up any stale in-flight result from a previous parse.
+    Returns `(FlightState, should_parse)`. If an active (non-completed) flight
+    already exists for `cache_key`, this thread registers as a waiter on it.
+    If no flight exists or the previous flight has already completed, a fresh
+    FlightState is created for this thread to parse.
     """
-    with _PARSE_EVENTS_LOCK:
-        # Clean up any stale in-flight result from a previous parse for this key
-        with _IN_FLIGHT_RESULTS_LOCK:
-            _IN_FLIGHT_RESULTS.pop(cache_key, None)
+    with _FLIGHT_STATES_LOCK:
+        existing = _FLIGHT_STATES.get(cache_key)
+        if existing is not None and not existing.completed:
+            existing.waiters += 1
+            return existing, False
 
-        event = _PARSE_EVENTS.get(cache_key)
-        if event is None:
-            event = threading.Event()
-            _PARSE_EVENTS[cache_key] = event
-            return event, True  # This thread should perform the parse
-        return event, False  # Another thread is parsing; wait on event
+        state = FlightState(event=threading.Event())
+        _FLIGHT_STATES[cache_key] = state
+        return state, True
 
 
-def _clear_parse_event(cache_key: Tuple) -> None:
-    """Remove the parse event for the given cache key after parse completes.
+def _signal_parse_complete(
+    cache_key: Tuple,
+    state: FlightState,
+    capture: Optional[ParsedCapture],
+) -> None:
+    """Signal that a parse has completed and store the result on `state`.
 
-    Note: We do NOT clean up the in-flight result here, as waiting threads
-    may still need to consume it. It will be cleaned up when the next parse
-    for the same key starts.
+    If no waiters are attached and `state` is still the active entry for
+    `cache_key`, remove it from `_FLIGHT_STATES` immediately.
     """
-    with _PARSE_EVENTS_LOCK:
-        _PARSE_EVENTS.pop(cache_key, None)
+    with _FLIGHT_STATES_LOCK:
+        state.result = capture
+        state.completed = True
+        state.event.set()
+        if state.waiters == 0 and _FLIGHT_STATES.get(cache_key) is state:
+            _FLIGHT_STATES.pop(cache_key, None)
 
 
-def _store_in_flight_result(cache_key: Tuple, capture: Optional[ParsedCapture]) -> None:
-    """Store the in-flight result for waiting threads to consume."""
-    with _IN_FLIGHT_RESULTS_LOCK:
-        _IN_FLIGHT_RESULTS[cache_key] = capture
+def _wait_and_consume(cache_key: Tuple, state: FlightState) -> Optional[ParsedCapture]:
+    """Wait for `state` to complete and consume its result.
 
-
-def _consume_in_flight_result(cache_key: Tuple) -> Optional[ParsedCapture]:
+    Decrements waiter count and cleans up `_FLIGHT_STATES[cache_key]` if this
+    was the last waiter and `state` is still the registered entry.
     """
-    Retrieve the in-flight result without removing it.
-    The result will be cleaned up on the next parse for the same key,
-    or when caches are cleared.
-    """
-    with _IN_FLIGHT_RESULTS_LOCK:
-        return _IN_FLIGHT_RESULTS.get(cache_key)
+    state.event.wait()
+    with _FLIGHT_STATES_LOCK:
+        result = state.result
+        state.waiters -= 1
+        if state.completed and state.waiters == 0 and _FLIGHT_STATES.get(cache_key) is state:
+            _FLIGHT_STATES.pop(cache_key, None)
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -516,42 +526,28 @@ def get_parsed_capture(pcap_path: str) -> Optional[ParsedCapture]:
     if fingerprint_before is None:
         return None
 
-    # Get or create the parse event for this cache key
-    parse_event, should_parse = _get_or_create_parse_event(cache_key)
+    # Get or create the flight state for this cache key
+    state, should_parse = _get_or_create_parse_event(cache_key)
 
     if should_parse:
         # This thread performs the parse
+        capture = None
         try:
-            capture = _parse_capture(pcap_path, cache_key, fingerprint_before)
-            # Store in-flight result for waiting threads (even if oversized or failed)
-            _store_in_flight_result(cache_key, capture)
-            if capture is not None and capture.total_packets > 0:
-                _cache_parsed_capture(pcap_path, capture)
+            # Double-check persistent cache in case another thread finished and
+            # popped its FlightState between our initial miss and acquiring this flight.
+            capture = _get_cached_capture(pcap_path)
+            if capture is None:
+                capture = _parse_capture(pcap_path, cache_key, fingerprint_before)
+                if capture is not None and capture.total_packets > 0:
+                    _cache_parsed_capture(pcap_path, capture)
             # If parse failed or file changed, don't cache anything
+            return capture
         finally:
-            # Always signal completion and clean up event
-            parse_event.set()
-            _clear_parse_event(cache_key)
+            # Always signal completion and clean up flight state if no waiters
+            _signal_parse_complete(cache_key, state, capture)
     else:
-        # Another thread is parsing; wait for it to complete
-        parse_event.wait()
-        # After wait, first check the persistent cache
-        cached = _get_cached_capture(pcap_path)
-        if cached is not None:
-            return cached
-        # If not in persistent cache, consume the in-flight result
-        # (for oversized captures or failed parses)
-        in_flight = _consume_in_flight_result(cache_key)
-        if in_flight is not None:
-            return in_flight
-        # If still no result, the parse failed or file changed; fall through to return None
-
-    # If we performed the parse, return our result (or None if failed)
-    if should_parse:
-        return capture
-
-    # Should not reach here, but safety fallback
-    return None
+        # Another thread is parsing; wait for it and consume its FlightState result
+        return _wait_and_consume(cache_key, state)
 
 
 def clear_caches() -> None:
@@ -560,10 +556,8 @@ def clear_caches() -> None:
     with _PARSED_CAPTURE_LOCK:
         _PARSED_CAPTURE_CACHE.clear()
         _CACHED_PACKET_COUNT = 0
-    with _PARSE_EVENTS_LOCK:
-        _PARSE_EVENTS.clear()
-    with _IN_FLIGHT_RESULTS_LOCK:
-        _IN_FLIGHT_RESULTS.clear()
+    with _FLIGHT_STATES_LOCK:
+        _FLIGHT_STATES.clear()
 
 
 def get_cache_stats() -> Dict[str, Any]:
