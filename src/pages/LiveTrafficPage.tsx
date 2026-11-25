@@ -55,7 +55,7 @@ interface SortState {
 }
 
 export function LiveTrafficPage() {
-  const packetsResult = useApi(() => api.getRecentPackets(100));
+  const packetsResult = useApi((signal) => api.getRecentPackets(100, signal));
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState('');

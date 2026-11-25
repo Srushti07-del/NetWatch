@@ -44,10 +44,10 @@ interface StatusCount {
 }
 
 export function AnalyticsPage() {
-  const metricsResult = useApi(() => api.getDashboardMetrics());
-  const trafficResult = useApi(() => api.getTrafficData());
-  const protocolResult = useApi(() => api.getProtocolDistribution());
-  const packetsResult = useApi(() => api.getRecentPackets(50));
+  const metricsResult = useApi((signal) => api.getDashboardMetrics(signal));
+  const trafficResult = useApi((signal) => api.getTrafficData(signal));
+  const protocolResult = useApi((signal) => api.getProtocolDistribution(signal));
+  const packetsResult = useApi((signal) => api.getRecentPackets(50, signal));
 
   // Copy feedback state
   const [copyFeedback, setCopyFeedback] = useState<{ message: string; type: 'success' | 'error' } | null>(null);

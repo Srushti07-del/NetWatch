@@ -28,11 +28,11 @@ const EMPTY_METRICS: DashboardMetrics = {
 };
 
 export function OverviewPage() {
-  const metricsResult = useApi(() => api.getDashboardMetrics());
-  const trafficResult = useApi(() => api.getTrafficData());
-  const protocolResult = useApi(() => api.getProtocolDistribution());
-  const packetsResult = useApi(() => api.getRecentPackets(10));
-  const securityResult = useApi(() => api.getSecurityEvents());
+  const metricsResult = useApi((signal) => api.getDashboardMetrics(signal));
+  const trafficResult = useApi((signal) => api.getTrafficData(signal));
+  const protocolResult = useApi((signal) => api.getProtocolDistribution(signal));
+  const packetsResult = useApi((signal) => api.getRecentPackets(10, signal));
+  const securityResult = useApi((signal) => api.getSecurityEvents(signal));
 
   const loading =
     metricsResult.loading ||

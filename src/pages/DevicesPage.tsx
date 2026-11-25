@@ -48,7 +48,7 @@ interface SortState {
 }
 
 export function DevicesPage() {
-  const devicesResult = useApi(() => api.getDevices());
+  const devicesResult = useApi((signal) => api.getDevices(signal));
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState('');

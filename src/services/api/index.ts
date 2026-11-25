@@ -39,50 +39,65 @@ export const IS_DEMO_MODE = import.meta.env.VITE_DEMO_MODE !== 'false';
 
 // ─── Mock data providers (demo mode only) ────────────────────────
 
-const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const delay = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('The operation was aborted.', 'AbortError'));
+      return;
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new DOMException('The operation was aborted.', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 
 const mockProviders = {
-  async getDashboardMetrics(): Promise<DashboardMetrics> {
-    await delay(0);
+  async getDashboardMetrics(signal?: AbortSignal): Promise<DashboardMetrics> {
+    await delay(0, signal);
     return mockMetrics;
   },
 
-  async getTrafficData(): Promise<TrafficDataPoint[]> {
-    await delay(0);
+  async getTrafficData(signal?: AbortSignal): Promise<TrafficDataPoint[]> {
+    await delay(0, signal);
     return mockTrafficData;
   },
 
-  async getProtocolDistribution(): Promise<ProtocolDataPoint[]> {
-    await delay(0);
+  async getProtocolDistribution(signal?: AbortSignal): Promise<ProtocolDataPoint[]> {
+    await delay(0, signal);
     return mockProtocolData;
   },
 
-  async getRecentPackets(limit = 10): Promise<NetworkPacket[]> {
-    await delay(0);
+  async getRecentPackets(limit = 10, signal?: AbortSignal): Promise<NetworkPacket[]> {
+    await delay(0, signal);
     return mockPackets.slice(0, limit);
   },
 
-  async getSecurityEvents(): Promise<SecurityEvent[]> {
-    await delay(0);
+  async getSecurityEvents(signal?: AbortSignal): Promise<SecurityEvent[]> {
+    await delay(0, signal);
     return mockSecurityEvents;
   },
 
-  async getDevices(): Promise<Device[]> {
-    await delay(0);
+  async getDevices(signal?: AbortSignal): Promise<Device[]> {
+    await delay(0, signal);
     return mockDevices;
   },
 
-  async getConnections(): Promise<Connection[]> {
-    await delay(0);
+  async getConnections(signal?: AbortSignal): Promise<Connection[]> {
+    await delay(0, signal);
     return mockConnections;
   },
 };
 
 // ─── Real HTTP API client (future FastAPI backend) ───────────────
 
-async function request<T>(path: string): Promise<T> {
+async function request<T>(path: string, signal?: AbortSignal): Promise<T> {
   const url = `${API_BASE_URL}${path}`;
-  const response = await fetch(url);
+  const response = await fetch(url, signal ? { signal } : undefined);
   if (!response.ok) {
     throw new Error(`API request failed: ${response.status} ${response.statusText}`);
   }
@@ -92,38 +107,38 @@ async function request<T>(path: string): Promise<T> {
 // ─── API service ─────────────────────────────────────────────────
 
 export const api = {
-  async getDashboardMetrics(): Promise<DashboardMetrics> {
-    if (IS_DEMO_MODE) return mockProviders.getDashboardMetrics();
-    return request<DashboardMetrics>('/api/dashboard/metrics');
+  async getDashboardMetrics(signal?: AbortSignal): Promise<DashboardMetrics> {
+    if (IS_DEMO_MODE) return mockProviders.getDashboardMetrics(signal);
+    return request<DashboardMetrics>('/api/dashboard/metrics', signal);
   },
 
-  async getTrafficData(): Promise<TrafficDataPoint[]> {
-    if (IS_DEMO_MODE) return mockProviders.getTrafficData();
-    return request<TrafficDataPoint[]>('/api/traffic');
+  async getTrafficData(signal?: AbortSignal): Promise<TrafficDataPoint[]> {
+    if (IS_DEMO_MODE) return mockProviders.getTrafficData(signal);
+    return request<TrafficDataPoint[]>('/api/traffic', signal);
   },
 
-  async getProtocolDistribution(): Promise<ProtocolDataPoint[]> {
-    if (IS_DEMO_MODE) return mockProviders.getProtocolDistribution();
-    return request<ProtocolDataPoint[]>('/api/protocols');
+  async getProtocolDistribution(signal?: AbortSignal): Promise<ProtocolDataPoint[]> {
+    if (IS_DEMO_MODE) return mockProviders.getProtocolDistribution(signal);
+    return request<ProtocolDataPoint[]>('/api/protocols', signal);
   },
 
-  async getRecentPackets(limit = 10): Promise<NetworkPacket[]> {
-    if (IS_DEMO_MODE) return mockProviders.getRecentPackets(limit);
-    return request<NetworkPacket[]>(`/api/packets?limit=${limit}`);
+  async getRecentPackets(limit = 10, signal?: AbortSignal): Promise<NetworkPacket[]> {
+    if (IS_DEMO_MODE) return mockProviders.getRecentPackets(limit, signal);
+    return request<NetworkPacket[]>(`/api/packets?limit=${limit}`, signal);
   },
 
-  async getSecurityEvents(): Promise<SecurityEvent[]> {
-    if (IS_DEMO_MODE) return mockProviders.getSecurityEvents();
-    return request<SecurityEvent[]>('/api/security-events');
+  async getSecurityEvents(signal?: AbortSignal): Promise<SecurityEvent[]> {
+    if (IS_DEMO_MODE) return mockProviders.getSecurityEvents(signal);
+    return request<SecurityEvent[]>('/api/security-events', signal);
   },
 
-  async getDevices(): Promise<Device[]> {
-    if (IS_DEMO_MODE) return mockProviders.getDevices();
-    return request<Device[]>('/api/devices');
+  async getDevices(signal?: AbortSignal): Promise<Device[]> {
+    if (IS_DEMO_MODE) return mockProviders.getDevices(signal);
+    return request<Device[]>('/api/devices', signal);
   },
 
-  async getConnections(): Promise<Connection[]> {
-    if (IS_DEMO_MODE) return mockProviders.getConnections();
-    return request<Connection[]>('/api/connections');
+  async getConnections(signal?: AbortSignal): Promise<Connection[]> {
+    if (IS_DEMO_MODE) return mockProviders.getConnections(signal);
+    return request<Connection[]>('/api/connections', signal);
   },
 };

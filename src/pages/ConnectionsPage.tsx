@@ -51,7 +51,7 @@ interface SortState {
 }
 
 export function ConnectionsPage() {
-  const connectionsResult = useApi(() => api.getConnections());
+  const connectionsResult = useApi((signal) => api.getConnections(signal));
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState('');

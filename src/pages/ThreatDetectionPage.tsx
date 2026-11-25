@@ -69,7 +69,7 @@ interface SortState {
 }
 
 export function ThreatDetectionPage() {
-  const eventsResult = useApi(() => api.getSecurityEvents());
+  const eventsResult = useApi((signal) => api.getSecurityEvents(signal));
 
   // Filter state
   const [searchQuery, setSearchQuery] = useState('');
